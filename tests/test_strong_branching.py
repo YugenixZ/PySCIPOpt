@@ -208,3 +208,6 @@ def test_dummy_feature_selector():
                            priority=10000000, maxdepth=-1, maxbounddist=1)
 
     scip.optimize()
+
+
+test_strong_branching()

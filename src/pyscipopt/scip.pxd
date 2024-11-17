@@ -320,6 +320,7 @@ cdef extern from "scip/scip.h":
         SCIP_ROWORIGINTYPE SCIP_ROWORIGINTYPE_SEPA   
         SCIP_ROWORIGINTYPE SCIP_ROWORIGINTYPE_REOPT  
 
+
     ctypedef bint SCIP_Bool
 
     ctypedef long long SCIP_Longint
@@ -504,6 +505,9 @@ cdef extern from "scip/scip.h":
         pass
 
     ctypedef union SCIP_DOMCHG:
+        pass
+
+    ctypedef struct SCIP_Stat:
         pass
 
     ctypedef void (*messagecallback) (SCIP_MESSAGEHDLR *messagehdlr, FILE *file, const char *msg) noexcept
@@ -772,6 +776,7 @@ cdef extern from "scip/scip.h":
     SCIP_Real SCIPvarGetAvgSol(SCIP_VAR* var)
     SCIP_Real SCIPgetVarPseudocost(SCIP* scip, SCIP_VAR *var, SCIP_BRANCHDIR dir)
     SCIP_Real SCIPvarGetCutoffSum(SCIP_VAR* var, SCIP_BRANCHDIR dir)
+    SCIP_Real SCIPvarGetPseudocost(SCIP_VAR* var, SCIP_STATUS* stat, SCIP_Real solvaldelta)
     SCIP_Longint SCIPvarGetNBranchings(SCIP_VAR* var, SCIP_BRANCHDIR dir)
 
     # LP Methods

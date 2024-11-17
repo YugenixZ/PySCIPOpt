@@ -904,6 +904,11 @@ cdef class Variable(Expr):
         """Get the weighted average solution of variable in all feasible primal solutions found"""
         return SCIPvarGetAvgSol(self.scip_var)
 
+    def getPscosts(self,stat, solvaldelta):
+        """Get the pseudo cost of the variable in the given solution"""
+        return SCIPgetVarPseudocost(self.scip_var, SCIP_STAT* stat, solvaldelta)
+
+
 cdef class Constraint:
     """Base class holding a pointer to corresponding SCIP_CONS"""
 
