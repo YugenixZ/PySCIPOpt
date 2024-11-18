@@ -180,19 +180,19 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         zl = (zl_high + zl_low) / 2
         m, n = A.shape  # m is the number of rows and n is the number of columns
         model_sub = Model("sub")
-        # model_sub.setHeuristics(SCIP_PARAMSETTING.AGGRESSIVE)
+
         # Define vector variables
         p = [model_sub.addVar(f"p_{i}", lb=0) for i in range(m)]
         s_L = model_sub.addVar(f"s_L", lb=0)
         q = [model_sub.addVar(f"q_{i}", lb=0) for i in range(m)]
         s_R = model_sub.addVar(f"s_R", lb=0)
-        pi_plus = [model_sub.addVar(f"pi_plus_{j}", lb=0, ub=M) for j in range(n)]
-        pi_minus = [model_sub.addVar(f"pi_minus_{j}", lb=0, ub=M) for j in range(n)]
+        pi_plus = [model_sub.addVar(f"pi_plus_{j}", vtype = "I", lb=0, ub=M) for j in range(n)]
+        pi_minus = [model_sub.addVar(f"pi_minus_{j}", vtype = "I", lb=0, ub=M) for j in range(n)]
         pi0 = model_sub.addVar("pi0", vtype="I")
-
+        pi = [model_sub.addVar(f"pi_{j}", vtype="I", lb = -M, ub = M) for j in range(n)]
         # pA − s_Lc − (π_plus - π_minus) = 0
         for j in range(n):
-            model_sub.addCons(quicksum(p[i] * A[i][j] for i in range(m)) - s_L * c[j] - (pi_plus[j] - pi_minus[j]) == 0)
+            model_sub.addCons(quicksum(p[i] * A[i][j] for i in range(m)) - s_L * c[j] - (pi[j]) == 0)
 
         # pb − s_Lz_l − π0 ≥ δ
         model_sub.addCons(
@@ -200,17 +200,17 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
 
         # qA − s_Rc + (π_plus - π_minus) = 0
         for j in range(n):
-            model_sub.addCons(quicksum(q[i] * A[i][j] for i in range(m)) - s_R * c[j] + (pi_plus[j] - pi_minus[j]) == 0)
+            model_sub.addCons(quicksum(q[i] * A[i][j] for i in range(m)) - s_R * c[j] + (pi[j]) == 0)
 
         # qb − s_Rz_l + π0 ≥ δ − 1
         model_sub.addCons(
             quicksum(q[i] * b[i] for i in range(m)) - s_R * zl + pi0 >= delta - 1)
 
-        # Add the constraint ∑ (π+_i + π-_i) ≤ k
+        # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
+        for i in range(n):
+            model_sub.addCons(pi[i] == pi_plus[i] - pi_minus[i])
+        # Add sum constraint for the absolute values
         model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
-
-        # Example constraint: sum of π variables should be non-negative
-        model_sub.addCons(quicksum(pi_plus[i] - pi_minus[i] for i in range(n)) >= 0)
 
         # # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the
         # # original problem
@@ -224,13 +224,16 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         #     model_sub.addCons(pi0 >= quicksum(pi[i] * x_star[i] for i in range(n)) + epsilon - 1)
 
         # model_sub.hideOutput()
+
         model_sub.setRealParam("limits/time", 1000)
         model_sub.optimize()
 
         if model_sub.getStatus() == "optimal":
 
             # Extract and print the solution if needed
-            pi_solution = np.array([model_sub.getVal(pi_plus[j]) - model_sub.getVal(pi_minus[j]) for j in range(n)])
+            pi_plus = [model_sub.getVal(pi_plus[j]) for j in range(n)]
+            pi_minus = [model_sub.getVal(pi_minus[j]) for j in range(n)]
+            pi_solution = np.array(pi_plus) - np.array(pi_minus)
             pi0_solution = model_sub.getVal(pi0)
             p = np.array([model_sub.getVal(p[i]) for i in range(m)])
             q = np.array([model_sub.getVal(q[i]) for i in range(m)])
@@ -277,9 +280,9 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
             s_L_solutions.append(s_L)
             s_R_solutions.append(s_R)
 
-            zl_low = zl
+            zl_low= zl
         else:
-            zl_high = zl
+            zl_high= zl
 
     best_zl = max(feasible_zl)
     idx_zl = feasible_zl.index(best_zl)
@@ -1279,14 +1282,21 @@ class TreeD:
         model.readProblem(self.probpath)
         if self.setfile:
             model.readParams(self.setfile)
+        # Adjust presolving settings
         model.setIntParam("presolving/maxrestarts", 0)
         model.setIntParam("presolving/maxrounds", 0)
-        # model.setParam("estimation/restarts/restartpolicy", "n")
-        # model.setParam("numerics/feastol", 1e-10)
+        model.setParam("estimation/restarts/restartpolicy", "n")
+        model.disablePropagation()
+        # # Adjust numerical tolerances
+        # model.setRealParam("numerics/feastol", 1e-9)
+        # model.setRealParam("numerics/dualfeastol", 1e-9)
+        # model.setRealParam("numerics/barrierconvtol", 1e-10)
+
+        # Adjust LP settings
         model.setSeparating(SCIP_PARAMSETTING.OFF)
         model.setPresolve(SCIP_PARAMSETTING.OFF)
         model.setHeuristics(SCIP_PARAMSETTING.OFF)
-        # model.setIntParam("propagating/probing/maxrounds", 0)
+
         if branchingrule == "generaldisjunction":
             mybranching = MyBranching(model)
             model.includeBranchrule(mybranching, "test branch", "test branching and probing and lp functions",
