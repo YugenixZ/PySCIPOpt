@@ -113,7 +113,10 @@ def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, conditi
             estimate = model_ck.getObjVal()
         else:
             status = "unchanged_zl"
-            estimate = model_org.getCurrentNode().getLowerbound()
+            estimate = 1e+20
+        # else:
+        #     status = "unchanged_zl"
+        #     estimate = model_org.getCurrentNode().getLowerbound()
     else:
         status = model_ck.getStatus()
         estimate = 1e+20
@@ -164,6 +167,8 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
     best_zl = zl_init
     best_pi_solutions = []
     best_pi0_solutions = []
+    best_pi_solution = None
+    best_pi0_solution = None
     p_solutions = []
     q_solutions = []
     s_L_solutions = []
@@ -214,7 +219,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
 
         # # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the
         # # original problem
-        status_LP = model.getLPSolstat()
+        # status_LP = model.getLPSolstat()
         # if status_LP == 1:
         #     x_star = []  # Get the solution of the curr LP
         #     epsilon = 1e-6
@@ -224,67 +229,69 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         #     model_sub.addCons(pi0 >= quicksum(pi[i] * x_star[i] for i in range(n)) + epsilon - 1)
 
         # model_sub.hideOutput()
-
+        # model_sub.setRealParam("numerics/feastol", 1e-9)
+        # model_sub.setRealParam("numerics/epsilon", 1e-12)
+        # model_sub.setRealParam("numerics/dualfeastol", 1e-10)
         model_sub.setRealParam("limits/time", 1000)
         model_sub.optimize()
 
         if model_sub.getStatus() == "optimal":
 
             # Extract and print the solution if needed
-            pi_plus = [model_sub.getVal(pi_plus[j]) for j in range(n)]
-            pi_minus = [model_sub.getVal(pi_minus[j]) for j in range(n)]
-            pi_solution = np.array(pi_plus) - np.array(pi_minus)
+            pi_solution = np.array([model_sub.getVal(pi[j]) for j in range(n)])
             pi0_solution = model_sub.getVal(pi0)
-            p = np.array([model_sub.getVal(p[i]) for i in range(m)])
-            q = np.array([model_sub.getVal(q[i]) for i in range(m)])
-            s_L = model_sub.getVal(s_L)
-            s_R = model_sub.getVal(s_R)
-            pb = np.dot(p, b)
-            qb = np.dot(q, b)
-
-            pA = np.dot(p, A)
-            qA = np.dot(q, A)
-
-            cons_1 = pA - s_L * c - pi_solution
-            cons_2 = pb - s_L * zl - pi0_solution - delta
-            cons_3 = qA - s_R * c + pi_solution
-            cons_4 = qb - s_R * zl + pi0_solution + 1 - delta
-
-            if status_LP == 1:
-                x_star = []  # Get the solution of the curr LP
-                epsilon = 1e-6
-                for v in model.getVars():
-                    x_star.append(model.getSolVal(None, v))
-                cx = np.dot(c, x_star)
-                cons_zl = cx - zl
-                Ax = np.dot(A, x_star)
-                confirm = []
-                for idx in range(len(b)):
-                    cons_A = Ax[idx] - b[idx]
-                    confirm.append(Ax[idx] - b[idx] > -1e-6)
-                    if not all(confirm):
-                        print("Error!")
-                pix = np.dot(pi_solution, x_star)
-                pi0x = pi0_solution
-                con_add1 = np.dot(pi_solution, x_star) - pi0_solution
-                print(con_add1)
+            # p = np.array([model_sub.getVal(p[i]) for i in range(m)])
+            # q = np.array([model_sub.getVal(q[i]) for i in range(m)])
+            # # pi_plus = [model_sub.getVal(pi_plus[j]) for j in range(n)]
+            # # pi_minus = [model_sub.getVal(pi_minus[j]) for j in range(n)]
+            # # s_L = model_sub.getVal(s_L)
+            # # s_R = model_sub.getVal(s_R)
+            # # pb = np.dot(p, b)
+            # # qb = np.dot(q, b)
+            # #
+            # # pA = np.dot(p, A)
+            # # qA = np.dot(q, A)
+            # #
+            # # cons_1 = pA - s_L * c - pi_solution
+            # # cons_2 = pb - s_L * zl - pi0_solution - delta
+            # # cons_3 = qA - s_R * c + pi_solution
+            # # cons_4 = qb - s_R * zl + pi0_solution + 1 - delta
+            #
+            # # if status_LP == 1:
+            # #     x_star = []  # Get the solution of the curr LP
+            # #     epsilon = 1e-6
+            # #     for v in model.getVars():
+            # #         x_star.append(model.getSolVal(None, v))
+            # #     cx = np.dot(c, x_star)
+            # #     cons_zl = cx - zl
+            # #     Ax = np.dot(A, x_star)
+            # #     confirm = []
+            # #     for idx in range(len(b)):
+            # #         cons_A = Ax[idx] - b[idx]
+            # #         confirm.append(Ax[idx] - b[idx] > -1e-6)
+            # #         if not all(confirm):
+            # #             print("Error!")
+            # #     pix = np.dot(pi_solution, x_star)
+            # #     pi0x = pi0_solution
+            # #     con_add1 = np.dot(pi_solution, x_star) - pi0_solution
+            # #     print(con_add1)
             assert np.abs(pi0_solution - np.round(pi0_solution)) < 1e-5
             assert (np.abs(pi_solution - np.round(pi_solution)) < 1e-5).all()
-            # assert np.abs(pi_solution).sum() + np.abs(pi0_solution) >= 1
+            assert np.abs(pi_solution).sum() + np.abs(pi0_solution) >= 1
 
             feasible_zl.append(zl)
             best_pi_solutions.append(pi_solution)
             best_pi0_solutions.append(pi0_solution)
-            p_solutions.append(p)
-            q_solutions.append(q)
-            s_L_solutions.append(s_L)
-            s_R_solutions.append(s_R)
+            # p_solutions.append(p)
+            # q_solutions.append(q)
+            # s_L_solutions.append(s_L)
+            # s_R_solutions.append(s_R)
 
             zl_low= zl
         else:
             zl_high= zl
-
-    best_zl = max(feasible_zl)
+    assert len(feasible_zl) == len(best_pi_solutions) == len(best_pi0_solutions)
+    best_zl = np.max(feasible_zl)
     idx_zl = feasible_zl.index(best_zl)
     best_pi_solution = best_pi_solutions[idx_zl]
     best_pi0_solution = best_pi0_solutions[idx_zl]
@@ -298,8 +305,6 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
     assert np.abs(best_pi_solution).sum() + np.abs(best_pi0_solution) > 1e-6
     cm1_data = [cm1, cm1_status, frac_1, lpcands_1, est_1]
     cm2_data = [cm2, cm2_status, frac_2, lpcands_2, est_2]
-
-
 
     return best_zl, best_pi_solution, best_pi0_solution, cm1_data, cm2_data
 
@@ -389,7 +394,7 @@ class MyBranching(Branchrule):
                 print("Both children are not added")
                 return {"result": SCIP_RESULT.DIDNOTRUN}
 
-            elif data_l[1] in ["updated_zl", "unchanged_zl"] and data_r[1] in ["updated_zl", "unchanged_zl"]:
+            elif data_l[1] == "updated_zl" and data_r[1] == "updated_zl":
 
                 left_child = self.model.createChild(downprio, data_l[4])
                 # add left constraint: pi * x <= pi0
@@ -418,7 +423,7 @@ class MyBranching(Branchrule):
                 print("Both children are infeasible")
                 return {"result": SCIP_RESULT.CUTOFF}
 
-            elif data_l[1] in ["updated_zl", "unchanged_zl"] and data_r[1] not in ["updated_zl", "unchanged_zl"] :
+            elif data_l[1] == "updated_zl" and data_r[1] != "updated_zl" :
 
                 child_node = self.model.createChild(downprio, data_l[4])
                 # add left constraint: pi * x <= pi0
@@ -430,7 +435,7 @@ class MyBranching(Branchrule):
                 print("Only Left constraint added:")
                 return {"result": SCIP_RESULT.BRANCHED}
 
-            elif data_l[1] not in ["updated_zl", "unchanged_zl"] and data_r[1] in ["updated_zl", "unchanged_zl"]:
+            elif data_r[1] == "updated_zl" and data_l[1] != "updated_zl":
 
                 child_node = self.model.createChild(downprio, data_r[4])
                 # add right constraint: pi * x >= pi0 + 1
@@ -1257,7 +1262,7 @@ class TreeD:
 
         return self.fig2d
 
-    def solve(self, branchingrule):
+    def solve(self, branchingrule, t):
         """Solve the instance and collect and generate the tree data"""
 
         self.nodelist = []
@@ -1287,15 +1292,14 @@ class TreeD:
         model.setIntParam("presolving/maxrounds", 0)
         model.setParam("estimation/restarts/restartpolicy", "n")
         model.disablePropagation()
-        # # Adjust numerical tolerances
-        # model.setRealParam("numerics/feastol", 1e-9)
-        # model.setRealParam("numerics/dualfeastol", 1e-9)
-        # model.setRealParam("numerics/barrierconvtol", 1e-10)
 
         # Adjust LP settings
         model.setSeparating(SCIP_PARAMSETTING.OFF)
         model.setPresolve(SCIP_PARAMSETTING.OFF)
         model.setHeuristics(SCIP_PARAMSETTING.OFF)
+
+        # Time limit for solving the problem
+        model.setRealParam("limits/time", 8*t)
 
         if branchingrule == "generaldisjunction":
             mybranching = MyBranching(model)
@@ -1492,6 +1496,7 @@ if __name__ == "__main__":
 
     # branchingrule_list = ["generaldisjunction", "fullstrong", "relpscost", "pscost", "mostinf"]
     branchingrule_list = ["generaldisjunction"]
+    time_list = [1000, 100, 50]
     files = os.listdir("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested")
     mps_files = [f for f in files if f.endswith(".mps")]
     for mps_file in mps_files:
@@ -1500,7 +1505,7 @@ if __name__ == "__main__":
         for i in branchingrule_list:
             treed = TreeD(probpath=mps_path,
                           showcuts=False, nodelimit=10000)
-            treed.solve(i)
+            treed.solve(i, 1000)
             fig = treed.draw2d(path=f"./{i}_nodes_plots/")
             # fig.show()
     # mf.setIntParam("branching/fullstrong/priority", 999999)
