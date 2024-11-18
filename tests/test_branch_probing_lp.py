@@ -186,8 +186,8 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         s_L = model_sub.addVar(f"s_L", lb=0)
         q = [model_sub.addVar(f"q_{i}", lb=0) for i in range(m)]
         s_R = model_sub.addVar(f"s_R", lb=0)
-        pi_plus = [model_sub.addVar(f"pi_plus_{j}", vtype = "I", lb=0, ub=M) for j in range(n)]
-        pi_minus = [model_sub.addVar(f"pi_minus_{j}", vtype = "I", lb=0, ub=M) for j in range(n)]
+        pi_plus = [model_sub.addVar(f"pi_plus_{j}", lb=0, ub=M) for j in range(n)]
+        pi_minus = [model_sub.addVar(f"pi_minus_{j}", lb=0, ub=M) for j in range(n)]
         pi0 = model_sub.addVar("pi0", vtype="I")
         pi = [model_sub.addVar(f"pi_{j}", vtype="I", lb = -M, ub = M) for j in range(n)]
         # pA − s_Lc − (π_plus - π_minus) = 0
