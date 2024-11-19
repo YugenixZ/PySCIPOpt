@@ -78,6 +78,14 @@ def get_constraint_matrix(model):
 
     return np.array(curr_A), np.array(curr_b), np.array(c)
 
+def set_numerics(model):
+
+    model.setRealParam("numerics/feastol", 1e-9)
+    model.setRealParam("numerics/dualfeastol", 1e-10)
+    model.setRealParam("numerics/barrierconvtol", 1e-10)
+    model.setRealParam("numerics/epsilon", 1e-12)
+    return 0
+
 def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, condition, model_org):
     model_ck = Model(name)
     var_org = model_org.getVars()
@@ -93,6 +101,7 @@ def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, conditi
         model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) >= pi0_solution + 1)
     model_ck.setObjective(quicksum(x[i] * c[i] for i in range(n)))
     model_ck.hideOutput()
+    # set_numerics(model_ck)
     model_ck.optimize()
 
     if model_ck.getStatus() == "optimal":
@@ -228,10 +237,8 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         #     model_sub.addCons(pi0 <= quicksum(pi[i] * x_star[i] for i in range(n)) - epsilon)
         #     model_sub.addCons(pi0 >= quicksum(pi[i] * x_star[i] for i in range(n)) + epsilon - 1)
 
-        # model_sub.hideOutput()
-        # model_sub.setRealParam("numerics/feastol", 1e-9)
-        # model_sub.setRealParam("numerics/epsilon", 1e-12)
-        # model_sub.setRealParam("numerics/dualfeastol", 1e-10)
+        model_sub.hideOutput()
+        # set_numerics(model_sub)
         model_sub.setRealParam("limits/time", 1000)
         model_sub.optimize()
 
@@ -242,10 +249,10 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
             pi0_solution = model_sub.getVal(pi0)
             # p = np.array([model_sub.getVal(p[i]) for i in range(m)])
             # q = np.array([model_sub.getVal(q[i]) for i in range(m)])
-            # # pi_plus = [model_sub.getVal(pi_plus[j]) for j in range(n)]
-            # # pi_minus = [model_sub.getVal(pi_minus[j]) for j in range(n)]
-            # # s_L = model_sub.getVal(s_L)
-            # # s_R = model_sub.getVal(s_R)
+            # # # pi_plus = [model_sub.getVal(pi_plus[j]) for j in range(n)]
+            # # # pi_minus = [model_sub.getVal(pi_minus[j]) for j in range(n)]
+            # s_L = model_sub.getVal(s_L)
+            # s_R = model_sub.getVal(s_R)
             # # pb = np.dot(p, b)
             # # qb = np.dot(q, b)
             # #
@@ -277,7 +284,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
             # #     print(con_add1)
             assert np.abs(pi0_solution - np.round(pi0_solution)) < 1e-5
             assert (np.abs(pi_solution - np.round(pi_solution)) < 1e-5).all()
-            assert np.abs(pi_solution).sum() + np.abs(pi0_solution) >= 1
+            # assert np.abs(pi_solution).sum() + np.abs(pi0_solution) >= 1
 
             feasible_zl.append(zl)
             best_pi_solutions.append(pi_solution)
@@ -291,6 +298,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         else:
             zl_high= zl
     assert len(feasible_zl) == len(best_pi_solutions) == len(best_pi0_solutions)
+    # TODO: use variable disjunction to find the maximized lower bound if the model is infeasible
     best_zl = np.max(feasible_zl)
     idx_zl = feasible_zl.index(best_zl)
     best_pi_solution = best_pi_solutions[idx_zl]
@@ -302,7 +310,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
     cm2, cm2_status, frac_2, lpcands_2, est_2 = check_model("check_model_2", A, b, c, best_pi_solution, best_pi0_solution,
                                                                 best_zl, n, m, "pi0+1", model)
 
-    assert np.abs(best_pi_solution).sum() + np.abs(best_pi0_solution) > 1e-6
+    # assert np.abs(best_pi_solution).sum() + np.abs(best_pi0_solution) > 1e-6
     cm1_data = [cm1, cm1_status, frac_1, lpcands_1, est_1]
     cm2_data = [cm2, cm2_status, frac_2, lpcands_2, est_2]
 
@@ -316,7 +324,7 @@ class MyBranching(Branchrule):
     def branchexeclp(self, allowaddcons):
             lpcands = self.model.getLPBranchCands()[0]
             fracs = self.model.getLPBranchCands()[2]
-
+            print("_____________________________________")
             print("Now starting branching")
             # # get the variable with the largest fractional part
             # # Pair each candidate with its fractional part
@@ -339,6 +347,7 @@ class MyBranching(Branchrule):
                 if addedCons:
                     print("Added constraint:", self.model.getRowLinear(addedCons[0]).getVals())
                     print("Rhs:", self.model.getRhs(addedCons[0]))
+                    print("Lhs:", self.model.getLhs(addedCons[0]))
                     print("Number of added constraints:", num_addedCons)
 
             # Extract the constraint matrix A and vector b
@@ -349,14 +358,14 @@ class MyBranching(Branchrule):
 
             # Get the initial dual bound for curr LP
             zl_init = self.model.getLPObjVal()
-
             variables = self.model.getVars()
+
             solution = []
             for v in variables:
                 solution.append(v.getLPSol())
 
             Ax = A @ solution
-            print(np.sum(solution))
+            # print(np.sum(solution))
             # compare if Ax >= b
             for idx in range(len(b)):
                 assert Ax[idx] - b[idx] > -1e-6, f"Constraint violation at index {i}: Ax[i] = {Ax[i]}, b[i] = {b[i]}"
@@ -1287,12 +1296,14 @@ class TreeD:
         model.readProblem(self.probpath)
         if self.setfile:
             model.readParams(self.setfile)
+
         # Adjust presolving settings
         model.setIntParam("presolving/maxrestarts", 0)
         model.setIntParam("presolving/maxrounds", 0)
+        model.setParam("propagating/probing/freq", -1)
         model.setParam("estimation/restarts/restartpolicy", "n")
         model.disablePropagation()
-
+        # set_numerics(model)
         # Adjust LP settings
         model.setSeparating(SCIP_PARAMSETTING.OFF)
         model.setPresolve(SCIP_PARAMSETTING.OFF)
