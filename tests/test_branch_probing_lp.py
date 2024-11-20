@@ -7,7 +7,15 @@ import networkx as nx
 import os
 import math
 from time import time
+import re
 
+def get_best_solution_value(file_path):
+    with open(file_path, 'r') as file:
+        for line in file:
+            match = re.search(r'\*BEST SOLN:\s+([\d.]+)', line)
+            if match:
+                return float(match.group(1))
+    return None
 
 def get_constraint_matrix(model):
     Cols = model.getLPColsData()
@@ -80,10 +88,10 @@ def get_constraint_matrix(model):
 
 def set_numerics(model):
 
-    model.setRealParam("numerics/feastol", 1e-9)
-    model.setRealParam("numerics/dualfeastol", 1e-10)
-    model.setRealParam("numerics/barrierconvtol", 1e-10)
-    model.setRealParam("numerics/epsilon", 1e-12)
+    # model.setRealParam("numerics/feastol", 1e-9)
+    # model.setRealParam("numerics/dualfeastol", 1e-10)
+    # model.setRealParam("numerics/barrierconvtol", 1e-13)
+    model.setRealParam("numerics/epsilon", 1e-7)
     return 0
 
 def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, condition, model_org):
@@ -100,7 +108,7 @@ def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, conditi
     elif condition == "pi0+1":
         model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) >= pi0_solution + 1)
     model_ck.setObjective(quicksum(x[i] * c[i] for i in range(n)))
-    model_ck.hideOutput()
+    # model_ck.hideOutput()
     # set_numerics(model_ck)
     model_ck.optimize()
 
@@ -186,12 +194,11 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
     cm2_data = None
 
     zl_low = zl_init
-    zl_high = zl_init * 2 if zl_init >= 0 else zl_init / 2
+    zl_high = zl_init * 2 if zl_init >= 0 else zl_init * 0.5
 
     feasible_zl = []
     while np.abs(zl_high - zl_low) > 1e-6:
-        # Adjust the tolerance as needed
-        zl = (zl_high + zl_low) / 2
+        zl = (zl_high + zl_low) * 0.5
         m, n = A.shape  # m is the number of rows and n is the number of columns
         model_sub = Model("sub")
 
@@ -202,29 +209,29 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         s_R = model_sub.addVar(f"s_R", lb=0)
         pi_plus = [model_sub.addVar(f"pi_plus_{j}", lb=0, ub=M) for j in range(n)]
         pi_minus = [model_sub.addVar(f"pi_minus_{j}", lb=0, ub=M) for j in range(n)]
+        pi = [model_sub.addVar(f"pi_{j}",vtype = "I", lb=-M, ub=M) for j in range(n)]
         pi0 = model_sub.addVar("pi0", vtype="I")
-        pi = [model_sub.addVar(f"pi_{j}", vtype="I", lb = -M, ub = M) for j in range(n)]
+
         # pA − s_Lc − (π_plus - π_minus) = 0
         for j in range(n):
             model_sub.addCons(quicksum(p[i] * A[i][j] for i in range(m)) - s_L * c[j] - (pi[j]) == 0)
 
         # pb − s_Lz_l − π0 ≥ δ
-        model_sub.addCons(
-            quicksum(p[i] * b[i] for i in range(m)) - s_L * zl - pi0 >= delta)
+        model_sub.addCons(quicksum(p[i] * b[i] for i in range(m)) - s_L * zl - pi0 >= delta)
 
         # qA − s_Rc + (π_plus - π_minus) = 0
         for j in range(n):
             model_sub.addCons(quicksum(q[i] * A[i][j] for i in range(m)) - s_R * c[j] + (pi[j]) == 0)
 
         # qb − s_Rz_l + π0 ≥ δ − 1
-        model_sub.addCons(
-            quicksum(q[i] * b[i] for i in range(m)) - s_R * zl + pi0 >= delta - 1)
+        model_sub.addCons(quicksum(q[i] * b[i] for i in range(m)) - s_R * zl + pi0 >= delta - 1)
 
         # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
+        model_sub.addCons(quicksum(pi_minus[i] - pi_plus[i] for i in range(n)) <= k)
+        model_sub.addCons(quicksum(pi_plus[i] - pi_minus[i] for i in range(n)) <= k)
+
         for i in range(n):
             model_sub.addCons(pi[i] == pi_plus[i] - pi_minus[i])
-        # Add sum constraint for the absolute values
-        model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
 
         # # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the
         # # original problem
@@ -239,7 +246,9 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
 
         model_sub.hideOutput()
         # set_numerics(model_sub)
+        model_sub.setParam("lp/scaling", 2)
         model_sub.setRealParam("limits/time", 1000)
+
         model_sub.optimize()
 
         if model_sub.getStatus() == "optimal":
@@ -289,22 +298,19 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
             feasible_zl.append(zl)
             best_pi_solutions.append(pi_solution)
             best_pi0_solutions.append(pi0_solution)
-            # p_solutions.append(p)
-            # q_solutions.append(q)
-            # s_L_solutions.append(s_L)
-            # s_R_solutions.append(s_R)
 
             zl_low= zl
         else:
             zl_high= zl
     assert len(feasible_zl) == len(best_pi_solutions) == len(best_pi0_solutions)
     # TODO: use variable disjunction to find the maximized lower bound if the model is infeasible
+    # use variable disjunction to find the maximized lower bound if the model is infeasible
     best_zl = np.max(feasible_zl)
     idx_zl = feasible_zl.index(best_zl)
     best_pi_solution = best_pi_solutions[idx_zl]
     best_pi0_solution = best_pi0_solutions[idx_zl]
 
- # Check the feasibility of Ax ≥ b, πx ≤ π0, cx ≤ zl and Ax ≥ b, πx ≥ π0 + 1, cx ≤ zl
+    # Check the feasibility of Ax ≥ b, πx ≤ π0, cx ≤ zl and Ax ≥ b, πx ≥ π0 + 1, cx ≤ zl
     cm1, cm1_status, frac_1, lpcands_1, est_1 = check_model("check_model_1", A, b, c, best_pi_solution , best_pi0_solution,
                                                                 best_zl, n, m, "pi", model)
     cm2, cm2_status, frac_2, lpcands_2, est_2 = check_model("check_model_2", A, b, c, best_pi_solution, best_pi0_solution,
@@ -322,10 +328,11 @@ class MyBranching(Branchrule):
         self.model = model
 
     def branchexeclp(self, allowaddcons):
-            lpcands = self.model.getLPBranchCands()[0]
-            fracs = self.model.getLPBranchCands()[2]
+            # lpcands = self.model.getLPBranchCands()[0]
+            # fracs = self.model.getLPBranchCands()[2]
             print("_____________________________________")
             print("Now starting branching")
+            print("model upper bound:", self.model.getPrimalbound())
             # # get the variable with the largest fractional part
             # # Pair each candidate with its fractional part
             # cand_frac_pairs = zip(lpcands, fracs)
@@ -366,7 +373,8 @@ class MyBranching(Branchrule):
 
             Ax = A @ solution
             # print(np.sum(solution))
-            # compare if Ax >= b
+
+            # Compare if Ax >= b
             for idx in range(len(b)):
                 assert Ax[idx] - b[idx] > -1e-6, f"Constraint violation at index {i}: Ax[i] = {Ax[i]}, b[i] = {b[i]}"
                     # print("A[i]:", A[i])
@@ -375,7 +383,7 @@ class MyBranching(Branchrule):
 
             delta = 0.05 #(np.sum(b)+ zl_init)* 1e-08
             M = 1
-            k = 2
+            k = 5
             zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
 
             downprio = 1.0
@@ -458,25 +466,6 @@ class MyBranching(Branchrule):
             else:
                 print("Both children are not added")
                 return {"result": SCIP_RESULT.DIDNOTRUN}
-
-            """
-            
-               /* get the fractional variables */
-               SCIP_CALL( SCIPbranchcandGetLPCands(branchcand, set, stat, lp, &lpcands, NULL, &lpcandsfrac, &nlpcands, NULL, NULL) );
-    
-               /* calculate the estimate: lowerbound + sum(min{f_j * pscdown_j, (1-f_j) * pscup_j}) */
-               estimate = SCIPnodeGetLowerbound(focusnode);
-    
-              /* create down child */
-              SCIP_CALL( SCIPcreateChild(scip, &downchild, downprio, estimate) );
-        
-              // consdataCreate(scip, &consdata, nconsvars, consvars, consvals, lhs, rhs)
-              // SCIPcreateCons(scip, downbcons, name, conshdlr, consdata, initial, separate, enforce, check, propagate,
-              //         local, modifiable, dynamic, removable, stickingatnode)
-              // SCIPaddConsNode(scip, downchild, downbcons, NULL);
-            
-            """
-
 
 class LPstatEventhdlr(Eventhdlr):
     """PySCIPOpt Event handler to collect data on LP events."""
@@ -1271,7 +1260,7 @@ class TreeD:
 
         return self.fig2d
 
-    def solve(self, branchingrule, t):
+    def solve(self, branchingrule, t, bestsol):
         """Solve the instance and collect and generate the tree data"""
 
         self.nodelist = []
@@ -1300,10 +1289,13 @@ class TreeD:
         # Adjust presolving settings
         model.setIntParam("presolving/maxrestarts", 0)
         model.setIntParam("presolving/maxrounds", 0)
-        model.setParam("propagating/probing/freq", -1)
+        # model.setParam("propagating/probing/freq", -1)
         model.setParam("estimation/restarts/restartpolicy", "n")
-        model.disablePropagation()
+        # model.setParam("lp/scaling", 2)
+        model.setObjlimit(bestsol)
+
         # set_numerics(model)
+
         # Adjust LP settings
         model.setSeparating(SCIP_PARAMSETTING.OFF)
         model.setPresolve(SCIP_PARAMSETTING.OFF)
@@ -1513,10 +1505,10 @@ if __name__ == "__main__":
     for mps_file in mps_files:
         print(mps_file)
         mps_path = os.path.join("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested", mps_file)
+        best_solution_value = get_best_solution_value(mps_path)
         for i in branchingrule_list:
-            treed = TreeD(probpath=mps_path,
-                          showcuts=False, nodelimit=10000)
-            treed.solve(i, 1000)
+            treed = TreeD(probpath=mps_path, showcuts=False, nodelimit=10000)
+            treed.solve(i, 1000, best_solution_value)
             fig = treed.draw2d(path=f"./{i}_nodes_plots/")
             # fig.show()
     # mf.setIntParam("branching/fullstrong/priority", 999999)
