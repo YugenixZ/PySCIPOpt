@@ -9,6 +9,27 @@ import math
 from time import time
 import re
 
+def scaling_factor(A, b, c, zl):
+    max_A = np.max(np.abs(A))
+    max_b = np.max(np.abs(b))
+    max_c = np.max(np.abs(c))
+    max_zl = np.abs(zl)
+
+    threshold = max_c
+
+    # Determine the scaling factor
+    factor = threshold if threshold > 1 else 1
+
+    # Scale the parameters
+    A_scaled = A / factor
+    b_scaled = b / factor
+    c_scaled = c / factor
+    zl_scaled = zl / factor
+
+    return A_scaled, b_scaled, c_scaled, zl_scaled, factor
+
+
+
 def get_best_solution_value(file_path):
     with open(file_path, 'r') as file:
         for line in file:
@@ -108,7 +129,7 @@ def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, conditi
     elif condition == "pi0+1":
         model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) >= pi0_solution + 1)
     model_ck.setObjective(quicksum(x[i] * c[i] for i in range(n)))
-    # model_ck.hideOutput()
+    model_ck.hideOutput()
     # set_numerics(model_ck)
     model_ck.optimize()
 
@@ -201,7 +222,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         zl = (zl_high + zl_low) * 0.5
         m, n = A.shape  # m is the number of rows and n is the number of columns
         model_sub = Model("sub")
-
+        A_scaled, b_scaled, c_scaled, zl_scaled, factor = scaling_factor(A, b, c, zl)
         # Define vector variables
         p = [model_sub.addVar(f"p_{i}", lb=0) for i in range(m)]
         s_L = model_sub.addVar(f"s_L", lb=0)
@@ -209,26 +230,25 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         s_R = model_sub.addVar(f"s_R", lb=0)
         pi_plus = [model_sub.addVar(f"pi_plus_{j}", lb=0, ub=M) for j in range(n)]
         pi_minus = [model_sub.addVar(f"pi_minus_{j}", lb=0, ub=M) for j in range(n)]
-        pi = [model_sub.addVar(f"pi_{j}",vtype = "I", lb=-M, ub=M) for j in range(n)]
+        pi = [model_sub.addVar(f"pi_{j}", vtype = "I", lb=-M, ub=M) for j in range(n)]
         pi0 = model_sub.addVar("pi0", vtype="I")
 
         # pA − s_Lc − (π_plus - π_minus) = 0
         for j in range(n):
-            model_sub.addCons(quicksum(p[i] * A[i][j] for i in range(m)) - s_L * c[j] - (pi[j]) == 0)
+            model_sub.addCons(quicksum(p[i] * A_scaled[i][j] for i in range(m)) - s_L * c_scaled[j] - (pi[j]) == 0)
 
         # pb − s_Lz_l − π0 ≥ δ
-        model_sub.addCons(quicksum(p[i] * b[i] for i in range(m)) - s_L * zl - pi0 >= delta)
+        model_sub.addCons(quicksum(p[i] * b_scaled[i] for i in range(m)) - s_L * zl_scaled - pi0 >= delta)
 
         # qA − s_Rc + (π_plus - π_minus) = 0
         for j in range(n):
-            model_sub.addCons(quicksum(q[i] * A[i][j] for i in range(m)) - s_R * c[j] + (pi[j]) == 0)
+            model_sub.addCons(quicksum(q[i] * A_scaled[i][j] for i in range(m)) - s_R * c_scaled[j] + (pi[j]) == 0)
 
         # qb − s_Rz_l + π0 ≥ δ − 1
-        model_sub.addCons(quicksum(q[i] * b[i] for i in range(m)) - s_R * zl + pi0 >= delta - 1)
+        model_sub.addCons(quicksum(q[i] * b_scaled[i] for i in range(m)) - s_R * zl_scaled + pi0 >= delta - 1)
 
         # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
-        model_sub.addCons(quicksum(pi_minus[i] - pi_plus[i] for i in range(n)) <= k)
-        model_sub.addCons(quicksum(pi_plus[i] - pi_minus[i] for i in range(n)) <= k)
+        model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
 
         for i in range(n):
             model_sub.addCons(pi[i] == pi_plus[i] - pi_minus[i])
@@ -245,8 +265,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         #     model_sub.addCons(pi0 >= quicksum(pi[i] * x_star[i] for i in range(n)) + epsilon - 1)
 
         model_sub.hideOutput()
-        # set_numerics(model_sub)
-        model_sub.setParam("lp/scaling", 2)
+        # model_sub.setParam("lp/scaling", 1)
         model_sub.setRealParam("limits/time", 1000)
 
         model_sub.optimize()
@@ -381,9 +400,9 @@ class MyBranching(Branchrule):
             cx = np.dot(c, solution)
             assert np.abs(cx - zl_init) < 1e-6, f"Objective violation: cx = {cx}, zl = {zl_init}"
 
-            delta = 0.05 #(np.sum(b)+ zl_init)* 1e-08
+            delta = 0.005 #(np.sum(b)+ zl_init)* 1e-08
             M = 1
-            k = 5
+            k = 2
             zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
 
             downprio = 1.0
@@ -408,7 +427,7 @@ class MyBranching(Branchrule):
 
             print("Allowaddcons:", allowaddcons)
             if data_l is None or data_r is None:
-                print("Both children are not added")
+                print("Both children are not added, data is None")
                 return {"result": SCIP_RESULT.DIDNOTRUN}
 
             elif data_l[1] == "updated_zl" and data_r[1] == "updated_zl":
