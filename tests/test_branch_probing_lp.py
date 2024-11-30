@@ -54,52 +54,55 @@ def get_constraint_matrix(model):
     curr_A = []
     curr_b = []
     for i in range(len(Rows)):
-        row = [0] * len(curr_vars)
+        row = [0] * len(Cols)
         for j in range(len(NonZ_col[i])):
 
             assert len(NonZ_col[i]) == len(NonZ_Coeff[i])
 
-            pres_varname = NonZ_col[i][j].getVar().name.split("_", 1)[-1]
+            # pres_varname = NonZ_col[i][j].getVar().name.split("_", 1)[-1]
+            pos_currCol = NonZ_col[i][j].getLPPos()
             temp_coeff = NonZ_Coeff[i][j]
-            row[curr_vars.index(pres_varname)] = temp_coeff
+            row[pos_currCol] = temp_coeff
 
         # TODO: Need to fix if there is a equality constraint
         lhs = Rows[i].getLhs()
         rhs = Rows[i].getRhs()
-        # if lhs == rhs:
-        #     temp_b = lhs
-        #     curr_A.append(row)
-        #     curr_b.append(temp_b)
-        #     curr_A.append([-coeff for coeff in row])
-        #     curr_b.append(-temp_b)
-        # elif lhs == -1e+20:
-        #     temp_b = -rhs
-        #     row = [-1 * coeff for coeff in row]
-        #     curr_A.append(row)
-        #     curr_b.append(temp_b)
-        # else:
-        #     temp_b = lhs
-        #     curr_A.append(row)
-        #     curr_b.append(temp_b)
-        temp_b = Rows[i].getLhs()
-        if temp_b == -1e+20:
-            temp_b = -Rows[i].getRhs()
-            row = [-1 * i for i in row]
-        curr_A.append(row)
-        curr_b.append(temp_b)
+        if lhs == rhs:
+            temp_b = lhs
+            curr_A.append(row)
+            curr_b.append(temp_b)
+            curr_A.append([-coeff for coeff in row])
+            curr_b.append(-temp_b)
+        elif lhs == -1e+20:
+            temp_b = -rhs
+            row = [-1 * coeff for coeff in row]
+            curr_A.append(row)
+            curr_b.append(temp_b)
+        else:
+            temp_b = lhs
+            curr_A.append(row)
+            curr_b.append(temp_b)
+        # temp_b = Rows[i].getLhs()
+        # if temp_b == -1e+20:
+        #     temp_b = -Rows[i].getRhs()
+        #     row = [-1 * i for i in row]
+        # curr_A.append(row)
+        # curr_b.append(temp_b)
     # Add the bound of each variable to the constraint matrix A and vector b
     for i in Cols:
         lb = i.getLb()
         ub = i.getUb()
         if lb > -1e+20:
-            row = [0] * len(curr_vars)
-            varname = i.getVar().name.split("_", 1)[-1]
-            row[curr_vars.index(varname)] = 1
+            row = [0] * len(Cols)
+            # varname = i.getVar().name.split("_", 1)[-1]
+            # row[curr_vars.index(varname)] = 1
+            row[i.getLPPos()] = 1
             curr_A.append(row)
             curr_b.append(lb)
         if ub < 1e+20:
-            row = [0] * len(curr_vars)
-            row[curr_vars.index(i.getVar().name.split("_", 1)[-1])] = -1
+            row = [0] * len(Cols)
+            # row[curr_vars.index(i.getVar().name.split("_", 1)[-1])] = -1
+            row[i.getLPPos()] = -1
             curr_A.append(row)
             curr_b.append(-ub)
 
@@ -112,6 +115,7 @@ def set_numerics(model):
     # model.setRealParam("numerics/barrierconvtol", 1e-13)
     model.setRealParam("numerics/epsilon", 1e-7)
     return 0
+
 def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition):
     model_ck = Model(name)
     x = [model_ck.addVar(f"x_{i}", lb=None) for i in range(n)]
@@ -136,6 +140,8 @@ def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition):
         sol = np.array(sol)
         Ax = np.dot(A, sol)
         cons_1 = Ax - b
+        for i in cons_1:
+            assert i > -1e-6
         pix = np.dot(pi_solution, sol)
         if condition == "pi0":
             cons_2 = pix - pi0_solution
@@ -145,22 +151,22 @@ def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition):
     return model_ck
 
 def check_feasibility(model, model_org, Best_zl, n):
-    lp_cands_ck = []
+    # lp_cands_ck = []
     if model.getStatus() == "optimal":
-        if model.getObjVal() - Best_zl >= 1e-6:
+        if model.getObjVal() - Best_zl > -1e-6:
             status = "updated_zl"
-            sol_ck = model.getBestSol()
             # Get the fractional part of the integer/binary variables
-            var_int = []
-            for i in range(n):
-                type_var = model.getVars()[i].vtype()
-                if type_var in ["INTEGER", "BINARY"]:
-                    sol = model.getSolVal(sol_ck, model.getVar()[i])
-                    temp_frac = sol - np.floor(sol)
-                    if temp_frac != 0:
-                        var_int.append(temp_frac)
-                        lp_cands_ck.append(model_org.getVar()[i])
-            frac = var_int
+            sol_ck = model.getBestSol()
+            # var_int = []
+            # for i in range(n):
+            #     type_var = model.getVars()[i].vtype()
+            #     if type_var in ["INTEGER", "BINARY"]:
+            #         sol = model.getSolVal(sol_ck, model.getVar()[i])
+            #         temp_frac = sol - np.floor(sol)
+            #         if temp_frac != 0:
+            #             var_int.append(temp_frac)
+            #             lp_cands_ck.append(model_org.getVar()[i])
+            # frac = var_int
             est = model.getObjVal()
         else:
             status = "unchanged_zl"
@@ -176,51 +182,51 @@ def check_feasibility(model, model_org, Best_zl, n):
 def get_estimate(status, model):
     return model.getObjVal() if status == "updated_zl" else 1e+20
 
-def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, condition, model_org):
-    model_ck = Model(name)
-    var_org = model_org.getVars()
-    lpcands_ck = []
-    frac = None
-    x = [model_ck.addVar(f"x_{i}", lb=None) for i in range(n)]
-
-    for j in range(m):
-        model_ck.addCons(quicksum(x[i] * A[j][i] for i in range(n)) >= b[j])
-    if condition == "pi0":
-        model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) <= pi0_solution)
-    elif condition == "pi0+1":
-        model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) >= pi0_solution + 1)
-    model_ck.setObjective(quicksum(x[i] * c[i] for i in range(n)))
-    model_ck.hideOutput()
-    model_ck.optimize()
-
-    if model_ck.getStatus() == "optimal":
-        if model_ck.getObjVal() > Best_zl:
-            status = "updated_zl"
-            sol_ck = model_ck.getBestSol()
-            # Get the fractional part of the integer/binary variables
-            var_int = []  # Initialize the list of integer variables with the size of n
-            for i in range(len(var_org)):
-                type_var = var_org[i].vtype()
-                if type_var in ["INTEGER", "BINARY"]:  # Check if the variable is integer or binary
-                    sol = model_ck.getSolVal(sol_ck, var_org[i])
-                    temp_frac = sol - np.floor(sol)
-                    if temp_frac != 0:
-                        var_int.append(temp_frac)
-                        lpcands_ck.append(var_org[i])  # Append the variable to the list of candidates
-                frac = var_int
-            estimate = model_ck.getObjVal()
-        else:
-            status = "unchanged_zl"
-            estimate = 1e+20
-        # else:
-        #     status = "unchanged_zl"
-        #     estimate = model_org.getCurrentNode().getLowerbound()
-    else:
-        status = model_ck.getStatus()
-        estimate = 1e+20
-
-
-    return model_ck, status, frac, lpcands_ck, estimate
+# def check_model(name, A, b, c, pi_solution, pi0_solution, Best_zl, n, m, condition, model_org):
+#     model_ck = Model(name)
+#     var_org = model_org.getVars()
+#     lpcands_ck = []
+#     frac = None
+#     x = [model_ck.addVar(f"x_{i}", lb=None) for i in range(n)]
+#
+#     for j in range(m):
+#         model_ck.addCons(quicksum(x[i] * A[j][i] for i in range(n)) >= b[j])
+#     if condition == "pi0":
+#         model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) <= pi0_solution)
+#     elif condition == "pi0+1":
+#         model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) >= pi0_solution + 1)
+#     model_ck.setObjective(quicksum(x[i] * c[i] for i in range(n)))
+#     model_ck.hideOutput()
+#     model_ck.optimize()
+#
+#     if model_ck.getStatus() == "optimal":
+#         if model_ck.getObjVal() > Best_zl:
+#             status = "updated_zl"
+#             sol_ck = model_ck.getBestSol()
+#             # Get the fractional part of the integer/binary variables
+#             var_int = []  # Initialize the list of integer variables with the size of n
+#             for i in range(len(var_org)):
+#                 type_var = var_org[i].vtype()
+#                 if type_var in ["INTEGER", "BINARY"]:  # Check if the variable is integer or binary
+#                     sol = model_ck.getSolVal(sol_ck, var_org[i])
+#                     temp_frac = sol - np.floor(sol)
+#                     if temp_frac != 0:
+#                         var_int.append(temp_frac)
+#                         lpcands_ck.append(var_org[i])  # Append the variable to the list of candidates
+#                 frac = var_int
+#             estimate = model_ck.getObjVal()
+#         else:
+#             status = "unchanged_zl"
+#             estimate = 1e+20
+#         # else:
+#         #     status = "unchanged_zl"
+#         #     estimate = model_org.getCurrentNode().getLowerbound()
+#     else:
+#         status = model_ck.getStatus()
+#         estimate = 1e+20
+#
+#
+#     return model_ck, status, frac, lpcands_ck, estimate
 
 def general_disjunction(A, b, c, zl_init, M, k, delta, model):
     """
@@ -260,37 +266,39 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         s_R = model_sub.addVar(f"s_R", lb=0)
         pi_plus = [model_sub.addVar(f"pi_plus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
         pi_minus = [model_sub.addVar(f"pi_minus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
-        pi0 = model_sub.addVar("pi0", vtype="I")
-        pi = [model_sub.addVar(f"pi_{j}", lb=-M, ub=M, vtype="I") for j in range(n)]
+        pi0 = model_sub.addVar("pi0", vtype="I",lb = None)
+        # pi = [model_sub.addVar(f"pi_{j}", lb=-M, ub=M, vtype="I") for j in range(n)]
+
         # pA − s_Lc − (π_plus - π_minus) = 0
         for j in range(n):
-            model_sub.addCons(quicksum(p[i] * A_scaled[i][j] for i in range(m)) - s_L * c_scaled[j] - pi[j] == 0)
+            model_sub.addCons(quicksum(p[i] * A_scaled[i][j] for i in range(m)) - s_L * c_scaled[j] - (pi_plus[j]-pi_minus[j]) == 0)
 
         # pb − s_Lz_l − π0 ≥ δ
         model_sub.addCons(quicksum(p[i] * b_scaled[i] for i in range(m)) - s_L * zl_scaled - pi0 >= delta_scaled)
 
         # qA − s_Rc + (π_plus - π_minus) = 0
         for j in range(n):
-            model_sub.addCons(quicksum(q[i] * A_scaled[i][j] for i in range(m)) - s_R * c_scaled[j] + pi[j] == 0)
+            model_sub.addCons(quicksum(q[i] * A_scaled[i][j] for i in range(m)) - s_R * c_scaled[j] + (pi_plus[j]-pi_minus[j]) == 0)
 
         # qb − s_Rz_l + π0 ≥ δ − 1
         model_sub.addCons(quicksum(q[i] * b_scaled[i] for i in range(m)) - s_R * zl_scaled + pi0 >= delta_scaled - 1)
 
         # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
-        model_sub.addCons(quicksum(np.abs(pi[i]) for i in range(n)) <= k)
+        # model_sub.addCons(quicksum(pi[i] for i in range(n)) <= k)
+        model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
 
-        # # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the
-        # # original problem
-        # status_LP = model.getLPSolstat()
-        # if status_LP == 1:
-        #     x_star = []  # Get the solution of the curr LP
-        #     epsilon = 1e-6
-        #     for v in model.getVars():
-        #         x_star.append(model.getSolVal(None, v))
-        #     model_sub.addCons(pi0 <= quicksum(pi[i] * x_star[i] for i in range(n)) - epsilon)
-        #     model_sub.addCons(pi0 >= quicksum(pi[i] * x_star[i] for i in range(n)) + epsilon - 1)
+        # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the
+        # original problem
+        status_LP = model.getLPSolstat()
+        if status_LP == 1:
+            x_star = []  # Get the solution of the curr LP
+            epsilon = 1e-4
+            for v in model.getVars():
+                x_star.append(model.getSolVal(None, v))
+            model_sub.addCons(pi0 <= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) - epsilon)
+            model_sub.addCons(pi0 >= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) + epsilon - 1)
 
-        model_sub.hideOutput()
+        # model_sub.hideOutput()
         # model_sub.setParam("lp/scaling", 1)
         model_sub.setRealParam("limits/time", 1000)
 
@@ -299,7 +307,8 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         if model_sub.getStatus() == "optimal":
 
             # Extract and print the solution if needed
-            pi_solution = np.array([model_sub.getVal(pi[i]) for i in range(n)])
+            # pi_solution = np.array([model_sub.getVal(pi[i]) for i in range(n)])
+            pi_solution = np.array([model_sub.getVal(pi_plus[i]) - model_sub.getVal(pi_minus[i]) for i in range(n)])
             pi0_solution = model_sub.getVal(pi0)
             # p = np.array([model_sub.getVal(p[i]) for i in range(m)])
             # q = np.array([model_sub.getVal(q[i]) for i in range(m)])
@@ -336,8 +345,9 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
             # #     pi0x = pi0_solution
             # #     con_add1 = np.dot(pi_solution, x_star) - pi0_solution
             # #     print(con_add1)
-            assert np.abs(pi0_solution - np.round(pi0_solution)) < 1e-5
-            assert (np.abs(pi_solution - np.round(pi_solution)) < 1e-5).all()
+            assert model_sub.isFeasIntegral(pi0_solution)
+            for i in pi_solution:
+                assert model_sub.isFeasIntegral(i)
             # assert np.abs(pi_solution).sum() + np.abs(pi0_solution) >= 1
 
             ck_model_l = check_model_two("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0")
@@ -451,7 +461,7 @@ class MyBranching(Branchrule):
             Ax = A @ solution
             # print(np.sum(solution))
 
-            # Compare if Ax >= b
+            # Assert tha Ax >= b
             for idx in range(len(b)):
                 assert Ax[idx] - b[idx] > -1e-6, f"Constraint violation at index {i}: Ax[i] = {Ax[i]}, b[i] = {b[i]}"
                     # print("A[i]:", A[i])
@@ -462,7 +472,7 @@ class MyBranching(Branchrule):
             M = 1
             k = 2
             zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
-
+            print(zl_curr)
             downprio = 1.0
 
             # # create down child for cm1_status
@@ -486,7 +496,7 @@ class MyBranching(Branchrule):
             print("Allowaddcons:", allowaddcons)
             if data_l is None or data_r is None:
                 print("Both children are not added, data is None")
-                return {"result": SCIP_RESULT.DIDNOTRUN}
+                return {"result": SCIP_RESULT.DIDNOTFIND}
 
             elif data_l[1] == "updated_zl" and data_r[1] == "updated_zl":
 
@@ -519,30 +529,33 @@ class MyBranching(Branchrule):
 
             elif data_l[1] == "updated_zl" and data_r[1] != "updated_zl" :
 
-                child_node = self.model.createChild(downprio, data_l[0])
+                # child_node = self.model.createChild(downprio, data_l[0])
                 # add left constraint: pi * x <= pi0
                 cons_l = self.model.createConsFromExpr(
                     quicksum(pi_curr[i] * variables[i] for i in range(len(variables))) <= pi0_curr,
                     'left' + str(curr_Node.getNumber()))
 
-                self.model.addConsNode(child_node, cons_l)
+                # self.model.addConsNode(child_node, cons_l)
+                self.model.addConsLocal(cons_l)
                 print("Only Left constraint added:")
-                return {"result": SCIP_RESULT.BRANCHED}
+                # return {"result": SCIP_RESULT.BRANCHED}
+                return {"result": SCIP_RESULT.CONSADDED}
 
             elif data_r[1] == "updated_zl" and data_l[1] != "updated_zl":
 
-                child_node = self.model.createChild(downprio, data_r[0])
+                # child_node = self.model.createChild(downprio, data_r[0])
                 # add right constraint: pi * x >= pi0 + 1
                 cons_r = self.model.createConsFromExpr(
                     quicksum(pi_curr[i] * variables[i] for i in range(len(variables))) >= pi0_curr + 1,
                     'right' + str(curr_Node.getNumber()))
-                self.model.addConsNode(child_node, cons_r)
+                # self.model.addConsNode(child_node, cons_r)
                 print("Only Right constraint added:")
-                return {"result": SCIP_RESULT.BRANCHED}
-
+                self.model.addConsLocal(cons_r)
+                # return {"result": SCIP_RESULT.BRANCHED}
+                return {"result": SCIP_RESULT.CONSADDED}
             else:
                 print("Both children are not added")
-                return {"result": SCIP_RESULT.DIDNOTRUN}
+                return {"result": SCIP_RESULT.DIDNOTFIND}
 
 class LPstatEventhdlr(Eventhdlr):
     """PySCIPOpt Event handler to collect data on LP events."""
@@ -1366,11 +1379,11 @@ class TreeD:
         # Adjust presolving settings
         model.setIntParam("presolving/maxrestarts", 0)
         model.setIntParam("presolving/maxrounds", 0)
-        model.setParam("propagating/probing/freq", -1)
+        # model.setParam("propagating/probing/freq", -1)
         model.setParam("estimation/restarts/restartpolicy", "n")
         # model.setParam("lp/scaling", 2)
         # model.setObjlimit(bestsol)
-
+        model.readSolFile(bestsol)
         # set_numerics(model)
 
         # Adjust LP settings
@@ -1540,10 +1553,11 @@ if __name__ == "__main__":
     for mps_file in mps_files:
         print(mps_file)
         mps_path = os.path.join("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested", mps_file)
-        best_solution_value = get_best_solution_value(mps_path)
+        # best_solution_value = get_best_solution_value(mps_path)
+        best_sol_file = mps_path.replace(".mps", ".sol")
         for i in branchingrule_list:
             treed = TreeD(probpath=mps_path, showcuts=False, nodelimit=10000)
-            treed.solve(i, 1000, best_solution_value)
+            treed.solve(i, 1000, best_sol_file)
             fig = treed.draw2d(path=f"./{i}_nodes_plots/")
             # fig.show()
     # mf.setIntParam("branching/fullstrong/priority", 999999)
