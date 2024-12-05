@@ -114,18 +114,22 @@ def set_numerics(model):
 
 def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition, best_zl):
     model_ck = Model(name)
-    x = [model_ck.addVar(f"x_{i}", lb=None) for i in range(n)]
+    x = [model_ck.addVar(f"x_{i}", vtype="C", lb=None) for i in range(n)]
 
     for j in range(m):
         model_ck.addCons(quicksum(A[j][i] * x[i] for i in range(n)) >= b[j])
+
     if condition == "pi0":
         model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) <= pi0_solution)
+
     elif condition == "pi0+1":
         model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) >= pi0_solution + 1)
+
     model_ck.setObjective(quicksum(x[i] * c[i] for i in range(n)))
     model_ck.hideOutput()
     # set_numerics(model_ck)
     model_ck.optimize()
+
     if model_ck.getStatus() == "optimal":
         cx = model_ck.getObjVal()
         sols = model_ck.getBestSol()
@@ -255,162 +259,125 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
      delta is a small positive number
     """
 
-    # Initialize variables
-    best_zl = zl_init
-    best_pi_solutions = []
-    best_pi0_solutions = []
-    p_solutions = []
-    q_solutions = []
-    s_L_solutions = []
-    s_R_solutions = []
-    estL_list = []
-    estR_list = []
-    Status_l = []
-    Status_r = []
-    zl_low = zl_init
-    zl_high = zl_init * 2 if zl_init >= 0 else zl_init * 0.5
+    try:
+        # Initialize variables
+        best_zl = zl_init
+        best_pi_solutions = []
+        best_pi0_solutions = []
+        p_solutions = []
+        q_solutions = []
+        s_L_solutions = []
+        s_R_solutions = []
+        estL_list = []
+        estR_list = []
+        Status_l = []
+        Status_r = []
+        zl_low = zl_init
+        zl_high = zl_init * 2 if zl_init >= 0 else zl_init * 0.5
 
-    feasible_zl = []
-    while np.abs(zl_high - zl_low) > 1e-4:
-        zl = (zl_high + zl_low) * 0.5
-        m, n = A.shape  # m is the number of rows and n is the number of columns
-        model_sub = Model("sub")
-        A_scaled, b_scaled, c_scaled, zl_scaled, delta_scaled, factor = scaling_factor(A, b, c, zl, delta)
+        feasible_zl = []
+        while np.abs(zl_high - zl_low) > 1e-4:
+            zl = (zl_high + zl_low) * 0.5
+            m, n = A.shape  # m is the number of rows and n is the number of columns
+            model_sub = Model("sub")
+            A_scaled, b_scaled, c_scaled, zl_scaled, delta_scaled, factor = scaling_factor(A, b, c, zl, delta)
 
-        # Define vector variables
-        p = [model_sub.addVar(f"p_{i}", lb=0) for i in range(m)]
-        s_L = model_sub.addVar(f"s_L", lb=0)
-        q = [model_sub.addVar(f"q_{i}", lb=0) for i in range(m)]
-        s_R = model_sub.addVar(f"s_R", lb=0)
-        # pi_plus = [model_sub.addVar(f"pi_plus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
-        # pi_minus = [model_sub.addVar(f"pi_minus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
-        pi0 = model_sub.addVar("pi0", vtype="I",lb = None)
-        pi = [model_sub.addVar(f"pi_{j}", lb=-M, ub=M, vtype="I") for j in range(n)]
+            # Define vector variables
+            p = [model_sub.addVar(f"p_{i}", lb=0) for i in range(m)]
+            s_L = model_sub.addVar(f"s_L", lb=0)
+            q = [model_sub.addVar(f"q_{i}", lb=0) for i in range(m)]
+            s_R = model_sub.addVar(f"s_R", lb=0)
+            pi_plus = [model_sub.addVar(f"pi_plus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
+            pi_minus = [model_sub.addVar(f"pi_minus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
+            pi0 = model_sub.addVar("pi0", vtype="I", lb=None)
 
-        # pA − s_Lc − (π_plus - π_minus) = 0
-        for j in range(n):
-            model_sub.addCons(quicksum(p[i] * A_scaled[i][j] for i in range(m)) - s_L * c_scaled[j] - pi[j] == 0)
+            # pA − s_Lc − (π_plus - π_minus) = 0
+            for j in range(n):
+                model_sub.addCons(
+                    quicksum(p[i] * A_scaled[i][j] for i in range(m)) - s_L * c_scaled[j] - pi_plus[j] + pi_minus[j] == 0)
 
-        # pb − s_Lz_l − π0 ≥ δ
-        model_sub.addCons(quicksum(p[i] * b_scaled[i] for i in range(m)) - s_L * zl_scaled - pi0 >= delta_scaled)
+            # pb − s_Lz_l − π0 ≥ δ
+            model_sub.addCons(quicksum(p[i] * b_scaled[i] for i in range(m)) - s_L * zl_scaled - pi0 >= delta_scaled)
 
-        # qA − s_Rc + (π_plus - π_minus) = 0
-        for j in range(n):
-            model_sub.addCons(quicksum(q[i] * A_scaled[i][j] for i in range(m)) - s_R * c_scaled[j] + pi[j] == 0)
+            # qA − s_Rc + (π_plus - π_minus) = 0
+            for j in range(n):
+                model_sub.addCons(
+                    quicksum(q[i] * A_scaled[i][j] for i in range(m)) - s_R * c_scaled[j] + pi_plus[j] - pi_minus[j] == 0)
 
-        # qb − s_Rz_l + π0 ≥ δ − 1
-        model_sub.addCons(quicksum(q[i] * b_scaled[i] for i in range(m)) - s_R * zl_scaled + pi0 >= delta_scaled - 1)
+            # qb − s_Rz_l + π0 ≥ δ − 1
+            model_sub.addCons(
+                quicksum(q[i] * b_scaled[i] for i in range(m)) - s_R * zl_scaled + pi0 >= delta_scaled - 1)
 
-        # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
-        # model_sub.addCons(quicksum(pi[i] for i in range(n)) <= k)
-        # model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
+            # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
+            model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
 
-        # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the
-        # original problem
-        status_LP = model.getLPSolstat()
-        if status_LP == 1:
-            x_star = []  # Get the solution of the curr LP
-            epsilon = 1e-4
-            for v in model.getVars():
-                x_star.append(model.getSolVal(None, v))
-            model_sub.addCons(pi0 <= quicksum(pi[i] * x_star[i] for i in range(n)) - epsilon)
-            model_sub.addCons(pi0 >= quicksum(pi[i] * x_star[i] for i in range(n)) + epsilon - 1)
+            # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the original problem
+            status_LP = model.getLPSolstat()
+            if status_LP == 1:
+                x_star = []  # Get the solution of the curr LP
+                epsilon = 1e-4
+                for v in model.getVars():
+                    x_star.append(model.getSolVal(None, v))
+                model_sub.addCons(pi0 <= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) - epsilon)
+                model_sub.addCons(
+                    pi0 >= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) + epsilon - 1)
+            # model_sub.hideOutput()
+            model_sub.setRealParam("limits/time", 1000)
+            model_sub.optimize()
 
-        # model_sub.hideOutput()
-        # model_sub.setParam("lp/scaling", 1)
-        model_sub.setRealParam("limits/time", 1000)
+            if model_sub.getStatus() == "optimal":
+                pi_solution = np.array([model_sub.getVal(pi_plus[i]) - model_sub.getVal(pi_minus[i]) for i in range(n)])
+                pi0_solution = model_sub.getVal(pi0)
+                assert model_sub.isFeasIntegral(pi0_solution)
+                for i in pi_solution:
+                    assert model_sub.isFeasIntegral(i)
 
-        model_sub.optimize()
+                ck_model_l = check_model_two("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
+                ck_model_l_t = check_model_test("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
+                ck_model_r = check_model_two("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
+                ck_model_r_t = check_model_test("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
 
-        if model_sub.getStatus() == "optimal":
+                status_l, est_l = check_feasibility(ck_model_l, model, zl, n)
+                status_r, est_r = check_feasibility(ck_model_r, model, zl, n)
 
-            # Extract and print the solution if needed
-            pi_solution = np.array([model_sub.getVal(pi[i]) for i in range(n)])
-            # pi_solution = np.array([model_sub.getVal(pi_plus[i]) - model_sub.getVal(pi_minus[i]) for i in range(n)])
-            pi0_solution = model_sub.getVal(pi0)
-            # p = np.array([model_sub.getVal(p[i]) for i in range(m)])
-            # q = np.array([model_sub.getVal(q[i]) for i in range(m)])
-            # # # pi_plus = [model_sub.getVal(pi_plus[j]) for j in range(n)]
-            # # # pi_minus = [model_sub.getVal(pi_minus[j]) for j in range(n)]
-            # s_L = model_sub.getVal(s_L)
-            # s_R = model_sub.getVal(s_R)
-            # # pb = np.dot(p, b)
-            # # qb = np.dot(q, b)
-            # #
-            # # pA = np.dot(p, A)
-            # # qA = np.dot(q, A)
-            # #
-            # # cons_1 = pA - s_L * c - pi_solution
-            # # cons_2 = pb - s_L * zl - pi0_solution - delta
-            # # cons_3 = qA - s_R * c + pi_solution
-            # # cons_4 = qb - s_R * zl + pi0_solution + 1 - delta
-            #
-            # # if status_LP == 1:
-            # #     x_star = []  # Get the solution of the curr LP
-            # #     epsilon = 1e-6
-            # #     for v in model.getVars():
-            # #         x_star.append(model.getSolVal(None, v))
-            # #     cx = np.dot(c, x_star)
-            # #     cons_zl = cx - zl
-            # #     Ax = np.dot(A, x_star)
-            # #     confirm = []
-            # #     for idx in range(len(b)):
-            # #         cons_A = Ax[idx] - b[idx]
-            # #         confirm.append(Ax[idx] - b[idx] > -1e-6)
-            # #         if not all(confirm):
-            # #             print("Error!")
-            # #     pix = np.dot(pi_solution, x_star)
-            # #     pi0x = pi0_solution
-            # #     con_add1 = np.dot(pi_solution, x_star) - pi0_solution
-            # #     print(con_add1)
-            assert model_sub.isFeasIntegral(pi0_solution)
-            for i in pi_solution:
-                assert model_sub.isFeasIntegral(i)
-            # assert np.abs(pi_solution).sum() + np.abs(pi0_solution) >= 1
-
-            ck_model_l = check_model_two("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
-            ck_model_l_t = check_model_test("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
-            ck_model_r = check_model_two("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
-            ck_model_r_t = check_model_test("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
-
-            status_l, est_l = check_feasibility(ck_model_l, model, zl, n)
-            status_r, est_r = check_feasibility(ck_model_r, model, zl, n)
-
-            if status_l == "updated_zl" or status_r == "updated_zl":
-                feasible_zl.append(zl)
-                best_pi_solutions.append(pi_solution)
-                best_pi0_solutions.append(pi0_solution)
-                Status_l.append(status_l)
-                Status_r.append(status_r)
-                zl_low = zl
-                if status_l == "updated_zl" and status_r != "updated_zl":
-                    estL_list.append(est_l)
-                    estR_list.append(1e+20)
-                elif status_r == "updated_zl" and status_l != "updated_zl":
-                    estR_list.append(est_r)
-                    estL_list.append(1e+20)
-                elif status_r == "updated_zl" and status_l == "updated_zl":
-                    estL_list.append(est_l)
-                    estR_list.append(est_r)
+                if status_l == "updated_zl" or status_r == "updated_zl":
+                    feasible_zl.append(zl)
+                    best_pi_solutions.append(pi_solution)
+                    best_pi0_solutions.append(pi0_solution)
+                    Status_l.append(status_l)
+                    Status_r.append(status_r)
+                    zl_low = zl
+                    if status_l == "updated_zl" and status_r != "updated_zl":
+                        estL_list.append(est_l)
+                        estR_list.append(1e+20)
+                    elif status_r == "updated_zl" and status_l != "updated_zl":
+                        estR_list.append(est_r)
+                        estL_list.append(1e+20)
+                    elif status_r == "updated_zl" and status_l == "updated_zl":
+                        estL_list.append(est_l)
+                        estR_list.append(est_r)
+                else:
+                    zl_high = zl
             else:
                 zl_high = zl
-            # feasible_zl.append(zl)
-            # best_pi_solutions.append(pi_solution)
-            # best_pi0_solutions.append(pi0_solution)
+
+        assert len(feasible_zl) == len(best_pi_solutions) == len(best_pi0_solutions)
+
+        if len(feasible_zl) == 0:
+            result = [None, None, None, None, None]
         else:
-            zl_high= zl
-    assert len(feasible_zl) == len(best_pi_solutions) == len(best_pi0_solutions)
+            best_zl = np.max(feasible_zl)
+            idx_zl = feasible_zl.index(best_zl)
+            best_pi_solution = best_pi_solutions[idx_zl]
+            best_pi0_solution = best_pi0_solutions[idx_zl]
+            data_l = [estL_list[idx_zl], Status_l[idx_zl]]
+            data_r = [estR_list[idx_zl], Status_r[idx_zl]]
+            result = [best_zl, best_pi_solution, best_pi0_solution, data_l, data_r]
 
-    if len(feasible_zl) == 0:
-        return None, None, None, None, None
-    else:
-        best_zl = np.max(feasible_zl)
-        idx_zl = feasible_zl.index(best_zl)
-        best_pi_solution = best_pi_solutions[idx_zl]
-        best_pi0_solution = best_pi0_solutions[idx_zl]
-        data_l = [estL_list[idx_zl], Status_l[idx_zl]]
-        data_r = [estR_list[idx_zl], Status_r[idx_zl]]
-
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        result = [None, None, None, None, None]
+        return result
     # # Check the feasibility of Ax ≥ b, πx ≤ π0, cx ≤ zl and Ax ≥ b, πx ≥ π0 + 1, cx ≤ zl
     # cm1, cm1_status, frac_1, lpcands_1, est_1 = check_model("check_model_1", A, b, c, best_pi_solution , best_pi0_solution,
     #                                                             best_zl, n, m, "pi", model)
@@ -422,7 +389,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
     # cm2_data = [cm2, cm2_status, frac_2, lpcands_2, est_2]
 
 
-        return best_zl, best_pi_solution, best_pi0_solution, data_l, data_r
+    return result
 
 class MyBranching(Branchrule):
 
@@ -1400,7 +1367,7 @@ class TreeD:
         model.setParam("estimation/restarts/restartpolicy", "n")
         # model.setParam("lp/scaling", 2)
         # model.setObjlimit(bestsol)
-        model.readSolFile(bestsol)
+        model.readSol(bestsol)
         # set_numerics(model)
 
         # Adjust LP settings
@@ -1551,47 +1518,43 @@ class TreeD:
 
 if __name__ == "__main__":
 
-    # branchingrule_list = ["generaldisjunction"]
-    # time_list = [1000, 100, 50]
+    branchingrule_list = ["generaldisjunction"]
+    time_list = [1000, 100, 50]
+    files = os.listdir("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/")
+    mps_files = [f for f in files if f.endswith(".mps")]
+    for mps_file in mps_files:
+        print(mps_file)
+        mps_path = os.path.join("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/", mps_file)
+        # best_solution_value = get_best_solution_value(mps_path)
+        best_sol_file = mps_path.replace(".mps", ".sol")
+        for i in branchingrule_list:
+            treed = TreeD(probpath=mps_path, showcuts=False, nodelimit=10000)
+            treed.solve(i, 1000, best_sol_file)
+            fig = treed.draw2d(path=f"./{i}_nodes_plots/")
+            # fig.show()
+
+
+
     # files = os.listdir("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested")
     # mps_files = [f for f in files if f.endswith(".mps")]
     # for mps_file in mps_files:
-    #     print(mps_file)
-    #     mps_path = os.path.join("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested", mps_file)
-    #     # best_solution_value = get_best_solution_value(mps_path)
-    #     best_sol_file = mps_path.replace(".mps", ".sol")
-    #     for i in branchingrule_list:
-    #         treed = TreeD(probpath=mps_path, showcuts=False, nodelimit=10000)
-    #         treed.solve(i, 1000, best_sol_file)
-    #         fig = treed.draw2d(path=f"./{i}_nodes_plots/")
-    #         fig.show()
-
-    # Use the problem from files
-    mf = Model("file")
-    mf.setIntParam("presolving/maxrounds", 0)
-
-    mf.setHeuristics(SCIP_PARAMSETTING.OFF)
-    mf.setSeparating(SCIP_PARAMSETTING.OFF)
-    mf.setPresolve(SCIP_PARAMSETTING.OFF)
-
-    files = os.listdir("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested")
-    mps_files = [f for f in files if f.endswith(".mps")]
-    for mps_file in mps_files:
-        print(f"Now testing {mps_file}")
-        mps_path = "D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested" + "/" + mps_file
-        mf.readProblem(mps_path)
-        mf.readSol(mps_path.replace(".mps", ".sol"))
-        my_branchrule_1 = MyBranching(mf)
-        mf.includeBranchrule(my_branchrule_1, "test branch", "test branching and probing and lp functions",
-                             priority=10000000, maxdepth=-1, maxbounddist=1)
-
-    # mf.readSol("D:/scipoptsuite-9.1.0/scipoptsuite-9.1.0/scip/check/instances/MIP/bell5.sol")
-    # mf.optimize()
-    # mte = Model("writeLp")
-    # mte.readProblem("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/misc03.mps")
-    # mte.writeProblem("D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/misc03.lp")
-        branchingrule_list = ["generaldisjunction", "fullstrong", "relpscost", "pscost", "mostinf"]
-        mf.optimize()
+    #     # Use the problem from files
+    #     mf = Model("file")
+    #     mf.setIntParam("presolving/maxrounds", 0)
+    #
+    #     mf.setHeuristics(SCIP_PARAMSETTING.OFF)
+    #     mf.setSeparating(SCIP_PARAMSETTING.OFF)
+    #     mf.setPresolve(SCIP_PARAMSETTING.OFF)
+    #     print(f"Now testing {mps_file}")
+    #     mps_path = "D:/scipoptsuite-8.1.0/res_log/sms/PySCIPOpt/tests/test_MIP/tested" + "/" + mps_file
+    #     mf.readProblem(mps_path)
+    #     mf.readSol(mps_path.replace(".mps", ".sol"))
+    #     my_branchrule_1 = MyBranching(mf)
+    #     mf.includeBranchrule(my_branchrule_1, "test branch", "test branching and probing and lp functions",
+    #                          priority=10000000, maxdepth=-1, maxbounddist=1)
+    #
+    #     branchingrule_list = ["generaldisjunction", "fullstrong", "relpscost", "pscost", "mostinf"]
+    #     mf.optimize()
     # # Create the model
     # model_kp = Model("Knapsack Problem")
     #
