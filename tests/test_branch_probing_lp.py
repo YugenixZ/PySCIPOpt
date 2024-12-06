@@ -37,12 +37,12 @@ def get_best_solution_value(file_path):
     return None
 
 def get_constraint_matrix(model):
-    Cols = model.getLPColsData()
+    cols_lp = model.getLPColsData()
     Rows = model.getLPRowsData()
     NonZ_col = [i.getCols() for i in Rows]
     NonZ_Coeff = [i.getVals() for i in Rows]
     c = []
-    for i in Cols:
+    for i in cols_lp:
         objcoeff = i.getObjCoeff()
         assert isinstance(objcoeff, object)
         c.append(objcoeff)
@@ -50,11 +50,11 @@ def get_constraint_matrix(model):
     assert len(NonZ_col) == len(NonZ_Coeff)
 
     # Extract the constraint matrix A and vector b
-    curr_vars = [i.getVar().name.split("_", 1)[-1] for i in Cols]
+    # curr_vars = [i.getVar().name.split("_", 1)[-1] for i in Cols]
     curr_A = []
     curr_b = []
     for i in range(len(Rows)):
-        row = [0] * len(Cols)
+        row = [0] * len(cols_lp)
         for j in range(len(NonZ_col[i])):
             assert len(NonZ_col[i]) == len(NonZ_Coeff[i])
             # pres_varname = NonZ_col[i][j].getVar().name.split("_", 1)[-1]
@@ -85,18 +85,18 @@ def get_constraint_matrix(model):
         # curr_A.append(row)
         # curr_b.append(temp_b)
     # Add the bound of each col of curr LP to the constraint matrix A and vector b
-    for i in Cols:
+    for i in cols_lp:
         lb = i.getLb()
         ub = i.getUb()
         if lb > -1e+20:
-            row = [0] * len(Cols)
+            row = [0] * len(cols_lp)
             # varname = i.getVar().name.split("_", 1)[-1]
             # row[curr_vars.index(varname)] = 1
             row[i.getLPPos()] = 1
             curr_A.append(row)
             curr_b.append(lb)
         if ub < 1e+20:
-            row = [0] * len(Cols)
+            row = [0] * len(cols_lp)
             # row[curr_vars.index(i.getVar().name.split("_", 1)[-1])] = -1
             row[i.getLPPos()] = -1
             curr_A.append(row)
@@ -114,7 +114,7 @@ def set_numerics(model):
 
 def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition, best_zl):
     model_ck = Model(name)
-    x = [model_ck.addVar(f"x_{i}", vtype="C", lb=None) for i in range(n)]
+    x = [model_ck.addVar(f"x_{i}", lb=None) for i in range(n)]
 
     for j in range(m):
         model_ck.addCons(quicksum(A[j][i] * x[i] for i in range(n)) >= b[j])
@@ -146,7 +146,7 @@ def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition, b
         if condition == "pi0":
             cons_2 = pix - pi0_solution
         else:
-            cons_2 = pix - pi0_solution + 1
+            cons_2 = pix - pi0_solution - 1
 
     return model_ck
 
@@ -175,7 +175,7 @@ def check_model_test(name, A, b, c, pi_solution, pi0_solution, n, m, condition, 
 def check_feasibility(model, model_org, Best_zl, n):
     # lp_cands_ck = []
     if model.getStatus() == "optimal":
-        if model.getObjVal() - Best_zl > -1e-6:
+        if model.getObjVal() - Best_zl > 1e-6:
             status = "updated_zl"
             # Get the fractional part of the integer/binary variables
             sol_ck = model.getBestSol()
@@ -273,10 +273,15 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         Status_l = []
         Status_r = []
         zl_low = zl_init
-        zl_high = zl_init * 2 if zl_init >= 0 else zl_init * 0.5
+        if zl_init > 0:
+            zl_high = zl_init * 2
+        elif zl_init < 0:
+            zl_high = zl_init / 2
+        else:
+            zl_high = 1
 
         feasible_zl = []
-        while np.abs(zl_high - zl_low) > 1e-4:
+        while np.abs(zl_high - zl_low) > 1e-6:
             zl = (zl_high + zl_low) * 0.5
             m, n = A.shape  # m is the number of rows and n is the number of columns
             model_sub = Model("sub")
@@ -316,12 +321,15 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
             if status_LP == 1:
                 x_star = []  # Get the solution of the curr LP
                 epsilon = 1e-4
-                for v in model.getVars():
-                    x_star.append(model.getSolVal(None, v))
+                Cols = model.getLPColsData()
+                for col in Cols:
+                    v_lp = col.getVar()
+                    x_star.append(model.getSolVal(None, v_lp))
+                # for v in model.getVars():
+                #     x_star.append(model.getSolVal(None, v))
                 model_sub.addCons(pi0 <= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) - epsilon)
-                model_sub.addCons(
-                    pi0 >= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) + epsilon - 1)
-            # model_sub.hideOutput()
+                model_sub.addCons(pi0 >= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) + epsilon - 1)
+            model_sub.hideOutput()
             model_sub.setRealParam("limits/time", 1000)
             model_sub.optimize()
 
@@ -434,12 +442,16 @@ class MyBranching(Branchrule):
 
             # Get the initial dual bound for curr LP
             zl_init = self.model.getLPObjVal()
-            variables = self.model.getVars()
+            Cols_lp = self.model.getLPColsData()
+            variables_lp = [c.getVar() for c in Cols_lp]
 
             solution = []
-            for v in variables:
+            for col in Cols_lp:
+                v = col.getVar()
                 solution.append(v.getLPSol())
 
+            # for v in variables:
+            #     solution.append(v.getLPSol())
             Ax = A @ solution
             # print(np.sum(solution))
 
@@ -485,7 +497,7 @@ class MyBranching(Branchrule):
                 left_child = self.model.createChild(downprio, data_l[0])
                 # add left constraint: pi * x <= pi0
                 cons_l = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables[i] for i in range(len(variables))) <= pi0_curr,
+                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
                     'left' + str(curr_Node.getNumber()))
                 # print("Left constraint pi:", pi_curr)
                 # print("Left constraint pi0:", pi0_curr)
@@ -495,7 +507,7 @@ class MyBranching(Branchrule):
                 right_child = self.model.createChild(downprio, data_r[0])
                 # add right constraint: pi * x >= pi0 + 1
                 cons_r = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables[i] for i in range(len(variables))) >= pi0_curr + 1,
+                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
                     'right' + str(curr_Node.getNumber()))
                 # print("Right constraint pi:", pi_curr)
                 # print("Right constraint pi0:", pi0_curr)
@@ -514,11 +526,11 @@ class MyBranching(Branchrule):
                 child_node = self.model.createChild(downprio, data_l[0])
                 # add left constraint: pi * x <= pi0
                 cons_l = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables[i] for i in range(len(variables))) <= pi0_curr,
+                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
                     'left' + str(curr_Node.getNumber()))
 
                 self.model.addConsNode(child_node, cons_l)
-                self.model.addConsLocal(cons_l)
+                # self.model.addConsLocal(cons_l)
                 print("Only Left constraint added:")
 
                 return {"result": SCIP_RESULT.BRANCHED}
@@ -529,11 +541,11 @@ class MyBranching(Branchrule):
                 child_node = self.model.createChild(downprio, data_r[0])
                 # add right constraint: pi * x >= pi0 + 1
                 cons_r = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables[i] for i in range(len(variables))) >= pi0_curr + 1,
+                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
                     'right' + str(curr_Node.getNumber()))
                 self.model.addConsNode(child_node, cons_r)
                 print("Only Right constraint added:")
-                self.model.addConsLocal(cons_r)
+                # self.model.addConsLocal(cons_r)
 
                 return {"result": SCIP_RESULT.BRANCHED}
                 # return {"result": SCIP_RESULT.CONSADDED}
@@ -1363,10 +1375,7 @@ class TreeD:
         # Adjust presolving settings
         model.setIntParam("presolving/maxrestarts", 0)
         model.setIntParam("presolving/maxrounds", 0)
-        # model.setParam("propagating/probing/freq", -1)
         model.setParam("estimation/restarts/restartpolicy", "n")
-        # model.setParam("lp/scaling", 2)
-        # model.setObjlimit(bestsol)
         model.readSol(bestsol)
         # set_numerics(model)
 
