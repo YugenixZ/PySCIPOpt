@@ -9,6 +9,126 @@ import math
 from time import time
 import re
 
+def get_information(model):
+    """
+    Get the information of the current node
+    :param model: SCIP model
+    :return: a print of the current node information
+    """
+    print("_____________________________________")
+    print("Now starting branching")
+
+    # Check if the added constraint is added to the node or not
+    curr_Node = model.getCurrentNode()
+    print("Current branching Node number:", curr_Node.getNumber())
+    if curr_Node.getDepth() > 0:
+        num_addedCons = curr_Node.getNAddedConss()
+        addedCons = curr_Node.getAddedConss()
+
+        if addedCons:
+            print("Added constraint:", model.getRowLinear(addedCons[0]).getVals())
+            print("Rhs:", model.getRhs(addedCons[0]))
+            print("Lhs:", model.getLhs(addedCons[0]))
+            print("Number of added constraints:", num_addedCons)
+
+    return curr_Node
+
+def test_model_Abc(model, A,b,c):
+    # Test if I got the right A, b, c by create another model min cx , s.t. Ax >= b
+    model_test = Model("test")
+    x = [model_test.addVar(f"x_{i}", lb=None) for i in range(A.shape[1])]
+    for j in range(A.shape[0]):
+        model_test.addCons(quicksum(A[j][i] * x[i] for i in range(A.shape[1])) >= b[j])
+
+    # Initialize the model
+    model_test.setObjective(quicksum(x[i] * c[i] for i in range(A.shape[1])))
+    model_test.setHeuristics(SCIP_PARAMSETTING.OFF)
+    model_test.setSeparating(SCIP_PARAMSETTING.OFF)
+    model_test.setPresolve(SCIP_PARAMSETTING.OFF)
+    model_test.hideOutput()
+    model_test.optimize()
+
+    status = model_test.getStatus()
+    obj_val = model_test.getObjVal()
+
+    Cols_lp = model.getLPColsData()
+    z_lp = model.getLPObjVal()
+    solution = []
+    for col in Cols_lp:
+        v = col.getVar()
+        solution.append(v.getLPSol())
+
+    Ax = A @ solution
+    # print(np.sum(solution))
+
+    # Assert tha Ax >= b
+    for idx in range(len(b)):
+        assert Ax[idx] - b[idx] > -1e-6, f"Constraint violation at index {idx}: Ax[i] = {Ax[idx]}, b[i] = {b[idx]}"
+        # print("A[i]:", A[i])
+    cx = np.dot(c, solution)
+    assert np.abs(cx - z_lp) < 1e-6, f"Objective violation: cx = {cx}, zl = {z_lp}"
+
+    return status, obj_val
+
+def create_children(model, curr_Node, A, allowaddcons, data_l, data_r, pi_curr, variables_lp, pi0_curr):
+
+    downprio = 1.0
+    print(f"Rows of A on Node {curr_Node.getNumber()}:", A.shape[0])
+    print(f"Columns of A on Node {curr_Node.getNumber()}:", A.shape[1])
+
+    if data_l is None or data_r is None:
+        print("Both children are not added, data is None")
+        return {"result": SCIP_RESULT.DIDNOTFIND}
+
+    elif data_l[1] == "updated_zl" and data_r[1] == "updated_zl":
+
+        left_child = model.createChild(downprio, data_l[0])
+        cons_l = model.createConsFromExpr(
+            quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
+            'left' + str(curr_Node.getNumber()))
+        model.addConsNode(left_child, cons_l)
+
+        right_child = model.createChild(downprio, data_r[0])
+        cons_r = model.createConsFromExpr(
+            quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
+            'right' + str(curr_Node.getNumber()))
+        model.addConsNode(right_child, cons_r)
+
+        print("Both children are added")
+        return {"result": SCIP_RESULT.BRANCHED}
+
+    elif data_l[1] == "infeasible" and data_r[1] == "infeasible":
+
+        print("Both children are infeasible")
+        return {"result": SCIP_RESULT.CUTOFF}
+
+    elif data_l[1] == "updated_zl" and data_r[1] != "updated_zl":
+
+        child_node = model.createChild(downprio, data_l[0])
+        cons_l = model.createConsFromExpr(
+            quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
+            'left' + str(curr_Node.getNumber()))
+
+        model.addConsNode(child_node, cons_l)
+        print("Only Left constraint added:")
+
+        return {"result": SCIP_RESULT.BRANCHED}
+
+    elif data_r[1] == "updated_zl" and data_l[1] != "updated_zl":
+
+        child_node = model.createChild(downprio, data_r[0])
+        cons_r = model.createConsFromExpr(
+            quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
+            'right' + str(curr_Node.getNumber()))
+        model.addConsNode(child_node, cons_r)
+        print("Only Right constraint added:")
+
+        return {"result": SCIP_RESULT.BRANCHED}
+
+    else:
+        print("Both children are not added")
+        return {"result": SCIP_RESULT.DIDNOTFIND}
+
 def scaling_factor(A, b, c, zl, delta):
     max_A = np.max(np.abs(A))
     max_b = np.max(np.abs(b))
@@ -172,27 +292,21 @@ def check_model_test(name, A, b, c, pi_solution, pi0_solution, n, m, condition, 
 
     return model_ck
 
-def check_feasibility(model, model_org, Best_zl, n):
+def check_feasibility(model, Best_zl, A, b, c):
     # lp_cands_ck = []
     if model.getStatus() == "optimal":
         if model.getObjVal() - Best_zl > 1e-6:
             status = "updated_zl"
             # Get the fractional part of the integer/binary variables
             sol_ck = model.getBestSol()
-            # var_int = []
-            # for i in range(n):
-            #     type_var = model.getVars()[i].vtype()
-            #     if type_var in ["INTEGER", "BINARY"]:
-            #         sol = model.getSolVal(sol_ck, model.getVar()[i])
-            #         temp_frac = sol - np.floor(sol)
-            #         if temp_frac != 0:
-            #             var_int.append(temp_frac)
-            #             lp_cands_ck.append(model_org.getVar()[i])
-            # frac = var_int
             est = model.getObjVal()
         else:
             status = "unchanged_zl"
             est = 1e+20
+            print("The z_l is less than the lower bound of the branched system")
+            print("A:", A)
+            print("b:", b)
+            print("c:", c)
             return status, est
     else:
         status = "infeasible"
@@ -341,12 +455,10 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
                     assert model_sub.isFeasIntegral(i)
 
                 ck_model_l = check_model_two("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
-                ck_model_l_t = check_model_test("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
                 ck_model_r = check_model_two("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
-                ck_model_r_t = check_model_test("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
 
-                status_l, est_l = check_feasibility(ck_model_l, model, zl, n)
-                status_r, est_r = check_feasibility(ck_model_r, model, zl, n)
+                status_l, est_l = check_feasibility(ck_model_l, zl, A, b, c)
+                status_r, est_r = check_feasibility(ck_model_r, zl, A, b, c)
 
                 if status_l == "updated_zl" or status_r == "updated_zl":
                     feasible_zl.append(zl)
@@ -405,158 +517,41 @@ class MyBranching(Branchrule):
         self.model = model
 
     def branchexeclp(self, allowaddcons):
-            # lpcands = self.model.getLPBranchCands()[0]
-            # fracs = self.model.getLPBranchCands()[2]
-            print("_____________________________________")
-            print("Now starting branching")
-            # print("model upper bound:", self.model.getPrimalbound())
-            # # get the variable with the largest fractional part
-            # # Pair each candidate with its fractional part
-            # cand_frac_pairs = zip(lpcands, fracs)
-            #
-            # # Find the candidate with the largest fractional part
-            # bestcand = max(cand_frac_pairs, key=lambda pair: pair[1])[0]
-            #
-            # down, eq, up = self.model.branchVar(bestcand)
-            # assert eq is None
-            # print("branching on", bestcand, "down", down, "up", up)
 
-            # Check if the added constraint is added to the node or not
-            curr_Node = self.model.getCurrentNode()
-            print("Current branching Node number:", curr_Node.getNumber())
-            if curr_Node.getDepth() > 0:
-                num_addedCons = curr_Node.getNAddedConss()
-                addedCons = curr_Node.getAddedConss()
+        # Get information about the current node
+        curr_Node = get_information(self.model)
+        Cols_lp = self.model.getLPColsData()
+        zl_init = self.model.getLPObjVal()
+        variables_lp = [c.getVar() for c in Cols_lp]
 
-                if addedCons:
-                    print("Added constraint:", self.model.getRowLinear(addedCons[0]).getVals())
-                    print("Rhs:", self.model.getRhs(addedCons[0]))
-                    print("Lhs:", self.model.getLhs(addedCons[0]))
-                    print("Number of added constraints:", num_addedCons)
+        # Extract the constraint matrix A and vector b
+        A, b, c = get_constraint_matrix(self.model)
 
-            # Extract the constraint matrix A and vector b
-            A, b, c = get_constraint_matrix(self.model)
+        assert len(c) == A.shape[1]
+        assert len(b) == A.shape[0]
 
-            assert len(c) == A.shape[1]
-            assert len(b) == A.shape[0]
+        # Test if got the right A, b, c by create another model (min cx ; s.t. Ax >= b)
+        status, test_objval = test_model_Abc(self.model, A, b, c)
+        print("Test model status:", status)
+        print("Test model objective value:", test_objval)
 
-            # Get the initial dual bound for curr LP
-            zl_init = self.model.getLPObjVal()
-            Cols_lp = self.model.getLPColsData()
-            variables_lp = [c.getVar() for c in Cols_lp]
+        # Excute the general disjunction algorithm
+        delta = 0.05
+        M = 1
+        k = 2
+        zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
 
-            solution = []
-            for col in Cols_lp:
-                v = col.getVar()
-                solution.append(v.getLPSol())
-
-            # for v in variables:
-            #     solution.append(v.getLPSol())
-            Ax = A @ solution
-            # print(np.sum(solution))
-
-            # Assert tha Ax >= b
-            for idx in range(len(b)):
-                assert Ax[idx] - b[idx] > -1e-6, f"Constraint violation at index {idx}: Ax[i] = {Ax[idx]}, b[i] = {b[idx]}"
-                    # print("A[i]:", A[i])
-            cx = np.dot(c, solution)
-            assert np.abs(cx - zl_init) < 1e-6, f"Objective violation: cx = {cx}, zl = {zl_init}"
-
-            delta = 0.05 #(np.sum(b)+ zl_init)* 1e-08
-            M = 1
-            k = 2
-            zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
-            print(zl_curr)
-            downprio = 1.0
-
-            # # create down child for cm1_status
-            # left_child = self.model.createChild(downprio, self.model.getLPObjVal())
-            # right_child = self.model.createChild(downprio, self.model.getLPObjVal())
-            # # add left constraint: pi * x <= pi0
-            # cons_l = self.model.createConsFromExpr(
-            #     lpcands[0] <= np.floor(lpcands[0].getLPSol()),
-            #     'left' + str(curr_Node.getNumber()))
-            # con_r = self.model.createConsFromExpr(
-            #     lpcands[0] >= np.ceil(lpcands[0].getLPSol()),
-            #     'right' + str(curr_Node.getNumber()))
-            #
-            # self.model.addConsNode(left_child, cons_l)
-            # self.model.addConsNode(right_child, con_r)
-
-            # create down child for cm1_status\
-            print(f"Rows of A on Node {curr_Node.getNumber()}:", A.shape[0])
-            print(f"Columns of A on Node {curr_Node.getNumber()}:", A.shape[1])
-
-            print("Allowaddcons:", allowaddcons)
-            if data_l is None or data_r is None:
-                print("Both children are not added, data is None")
-                return {"result": SCIP_RESULT.DIDNOTFIND}
-
-            elif data_l[1] == "updated_zl" and data_r[1] == "updated_zl":
-
-                left_child = self.model.createChild(downprio, data_l[0])
-                # add left constraint: pi * x <= pi0
-                cons_l = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
-                    'left' + str(curr_Node.getNumber()))
-                # print("Left constraint pi:", pi_curr)
-                # print("Left constraint pi0:", pi0_curr)
-                self.model.addConsNode(left_child, cons_l)
-
-                # create down child for cm2_status
-                right_child = self.model.createChild(downprio, data_r[0])
-                # add right constraint: pi * x >= pi0 + 1
-                cons_r = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
-                    'right' + str(curr_Node.getNumber()))
-                # print("Right constraint pi:", pi_curr)
-                # print("Right constraint pi0:", pi0_curr)
-                self.model.addConsNode(right_child, cons_r)
-
-                print("Both children are added")
-                return {"result": SCIP_RESULT.BRANCHED}
-
-            elif data_l[1] == "infeasible" and data_r[1] == "infeasible":
-
-                print("Both children are infeasible")
-                return {"result": SCIP_RESULT.CUTOFF}
-
-            elif data_l[1] == "updated_zl" and data_r[1] != "updated_zl" :
-
-                child_node = self.model.createChild(downprio, data_l[0])
-                # add left constraint: pi * x <= pi0
-                cons_l = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
-                    'left' + str(curr_Node.getNumber()))
-
-                self.model.addConsNode(child_node, cons_l)
-                # self.model.addConsLocal(cons_l)
-                print("Only Left constraint added:")
-
-                return {"result": SCIP_RESULT.BRANCHED}
-                # return {"result": SCIP_RESULT.CONSADDED}
-
-            elif data_r[1] == "updated_zl" and data_l[1] != "updated_zl":
-
-                child_node = self.model.createChild(downprio, data_r[0])
-                # add right constraint: pi * x >= pi0 + 1
-                cons_r = self.model.createConsFromExpr(
-                    quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
-                    'right' + str(curr_Node.getNumber()))
-                self.model.addConsNode(child_node, cons_r)
-                print("Only Right constraint added:")
-                # self.model.addConsLocal(cons_r)
-
-                return {"result": SCIP_RESULT.BRANCHED}
-                # return {"result": SCIP_RESULT.CONSADDED}
-            else:
-                print("Both children are not added")
-                return {"result": SCIP_RESULT.DIDNOTFIND}
+        # Create children
+        create_children(self.model, curr_Node, A, allowaddcons, data_l, data_r, pi_curr, variables_lp, pi0_curr)
 
 class LPstatEventhdlr(Eventhdlr):
     """PySCIPOpt Event handler to collect data on LP events."""
 
     transvars = {}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(args, kwargs)
+        self.nodelist = None
 
     def collectNodeInfo(self, firstlp=True):
         objval = self.model.getSolObjVal(None)
