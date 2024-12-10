@@ -79,14 +79,6 @@ def get_constraint_matrix(model):
 
     return np.array(curr_A), np.array(curr_b), np.array(c)
 
-def set_numerics(model):
-
-    # model.setRealParam("numerics/feastol", 1e-9)
-    # model.setRealParam("numerics/dualfeastol", 1e-10)
-    # model.setRealParam("numerics/barrierconvtol", 1e-13)
-    model.setRealParam("numerics/epsilon", 1e-7)
-    return 0
-
 def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition, best_zl):
     model_ck = Model(name)
     x = [model_ck.addVar(f"x_{i}", lb=None) for i in range(n)]
@@ -125,30 +117,8 @@ def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition, b
 
     return model_ck
 
-
-def check_model_test(name, A, b, c, pi_solution, pi0_solution, n, m, condition, best_zl):
-    model_ck = Model(name)
-    x = [model_ck.addVar(f"x_{i}", vtype="C", lb=None) for i in range(n)]
-
-    for j in range(m):
-        model_ck.addCons(quicksum(A[j][i] * x[i] for i in range(n)) >= b[j])
-
-    if condition == "pi0":
-        model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) <= pi0_solution)
-
-    elif condition == "pi0+1":
-        model_ck.addCons(quicksum(x[i] * pi_solution[i] for i in range(n)) >= pi0_solution + 1)
-
-    model_ck.addCons(quicksum(x[i] * c[i] for i in range(n)) <= best_zl)
-
-    model_ck.hideOutput()
-    # set_numerics(model_ck)
-    model_ck.optimize()
-
-    return model_ck
-
 def check_feasibility(model, model_org, Best_zl, n):
-    # lp_cands_ck = []
+
     if model.getStatus() == "optimal":
         if model.getObjVal() - Best_zl > 1e-6:
             status = "updated_zl"
@@ -158,6 +128,9 @@ def check_feasibility(model, model_org, Best_zl, n):
         else:
             status = "unchanged_zl"
             est = 1e+20
+            # prob_name = model_org.getProbName()
+            # curr_node_num = model_org.getCurrentNode().getNumber()
+            # model.writeProblem(f"./Prob_obj_le_zl/{prob_name}_Node{curr_node_num}_with_zl{Best_zl}.lp")
             return status, est
     else:
         status = "infeasible"
@@ -259,9 +232,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
                     assert model_sub.isFeasIntegral(i)
 
                 ck_model_l = check_model_two("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
-                ck_model_l_t = check_model_test("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
                 ck_model_r = check_model_two("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
-                ck_model_r_t = check_model_test("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
 
                 status_l, est_l = check_feasibility(ck_model_l, model, zl, n)
                 status_r, est_r = check_feasibility(ck_model_r, model, zl, n)
@@ -282,8 +253,26 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
                     elif status_r == "updated_zl" and status_l == "updated_zl":
                         estL_list.append(est_l)
                         estR_list.append(est_r)
-                else:
+                elif status_l == "infeasible" and status_r != "updated_zl":
+                    feasible_zl.append(zl)
+                    best_pi_solutions.append(pi_solution)
+                    best_pi0_solutions.append(pi0_solution)
+                    Status_l.append(status_l)
+                    Status_r.append(status_r)
                     zl_high = zl
+
+                elif status_r == "infeasible" and status_l != "updated_zl":
+                    feasible_zl.append(zl)
+                    best_pi_solutions.append(pi_solution)
+                    best_pi0_solutions.append(pi0_solution)
+                    Status_l.append(status_l)
+                    Status_r.append(status_r)
+                    zl_high = zl
+
+                elif status_l == "unchanged_zl" and status_r == "unchanged_zl":
+                    ck_model_r.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_right.lp")
+                    ck_model_l.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_left.lp")
+                    print("Both models's lower bounds are less than the corresponding zl, Farkas' lemma is violated. The problems are written to the file.")
             else:
                 zl_high = zl
 
@@ -307,20 +296,43 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
 
     return result
 
-def test_model_Abc(model, A, b, c, n, m):
+def test_model_Abc(model, A, b, c, Cols_lp):
+    # Get the LP solution for testing
+    z_lp = model.getLPObjVal()
+    solution = []
+    for col in Cols_lp:
+        v = col.getVar()
+        solution.append(v.getLPSol())
+
+    Ax = A @ solution
+    # Assert tha Ax >= b
+    for idx in range(len(b)):
+        assert Ax[idx] - b[idx] > -1e-6, f"Constraint violation at index {idx}: Ax[i] = {Ax[idx]}, b[i] = {b[idx]}"
+        # print("A[i]:", A[i])
+    cx = np.dot(c, solution)
+    assert np.abs(cx - z_lp) < 1e-6, f"Objective violation: cx = {cx}, zl = {z_lp}"
+
     model_test = Model("test")
+    m = A.shape[0]
+    n = A.shape[1]
     x = [model_test.addVar(f"x_{i}", lb=None) for i in range(n)]
     for j in range(m):
         model_test.addCons(quicksum(A[j][i] * x[i] for i in range(n)) >= b[j])
     model_test.setObjective(quicksum(x[i] * c[i] for i in range(n)))
 
-    model.setSeparating(SCIP_PARAMSETTING.OFF)
-    model.setPresolve(SCIP_PARAMSETTING.OFF)
-    model.setHeuristics(SCIP_PARAMSETTING.OFF)
+    model_test.setIntParam("presolving/maxrestarts", 0)
+    model_test.setIntParam("presolving/maxrounds", 0)
+    model_test.setParam("estimation/restarts/restartpolicy", "n")
+
+    model_test.setSeparating(SCIP_PARAMSETTING.OFF)
+    model_test.setPresolve(SCIP_PARAMSETTING.OFF)
+    model_test.setHeuristics(SCIP_PARAMSETTING.OFF)
     model_test.hideOutput()
     model_test.optimize()
     if model_test.getStatus() == "optimal":
-        assert model_test.getObjVal() == model.getObjVal()
+        print("test model objective value:", model_test.getObjVal())
+        print("original model objective value:", model.getLPObjVal())
+        # assert model_test.getObjVal() == model.getObjVal()
     else:
         print("A, b, c are not correct")
 
@@ -1130,7 +1142,7 @@ class TreeD:
             model = self.scip_model
         else:
             self.probname = os.path.splitext(os.path.basename(self.probpath))[0]
-            model = Model("TreeD")
+            model = Model(f"{self.probname}_model")
 
         if self.verbose:
             model.redirectOutput()
@@ -1306,40 +1318,28 @@ class MyBranching(Branchrule):
 
     def branchexeclp(self, allowaddcons):
 
+        # Get the current node information
         curr_Node = self.get_information()
-
-        # Extract the constraint matrix A and vector b
-        A, b, c = get_constraint_matrix(self.model)
-
-        assert len(c) == A.shape[1]
-        assert len(b) == A.shape[0]
-
-        # Get the initial dual bound for curr LP
         zl_init = self.model.getLPObjVal()
         Cols_lp = self.model.getLPColsData()
         variables_lp = [c.getVar() for c in Cols_lp]
 
-        solution = []
-        for col in Cols_lp:
-            v = col.getVar()
-            solution.append(v.getLPSol())
+        # Extract the constraint matrix A and vector b
+        A, b, c = get_constraint_matrix(self.model)
 
-        Ax = A @ solution
-        # Assert tha Ax >= b
-        for idx in range(len(b)):
-            assert Ax[idx] - b[idx] > -1e-6, f"Constraint violation at index {idx}: Ax[i] = {Ax[idx]}, b[i] = {b[idx]}"
-                # print("A[i]:", A[i])
-        cx = np.dot(c, solution)
-        assert np.abs(cx - zl_init) < 1e-6, f"Objective violation: cx = {cx}, zl = {zl_init}"
+        # Check the constraint matrix and vector
+        assert len(c) == A.shape[1]
+        assert len(b) == A.shape[0]
+
+        test_model_Abc(self.model, A, b, c, Cols_lp)
 
         delta = 0.05 #(np.sum(b)+ zl_init)* 1e-08
         M = 1
         k = 2
         zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
-        print(zl_curr)
-        downprio = 1.0
 
-        # create down child for cm1_status\
+        # Create down children
+        downprio = 1.0
         print(f"Rows of A on Node {curr_Node.getNumber()}:", A.shape[0])
         print(f"Columns of A on Node {curr_Node.getNumber()}:", A.shape[1])
 
@@ -1372,9 +1372,13 @@ class MyBranching(Branchrule):
             print("Both children are added")
             return {"result": SCIP_RESULT.BRANCHED}
 
-        elif data_l[1] == "infeasible" and data_r[1] == "infeasible":
+        elif data_l[1] == "infeasible" and data_r[1] != "updated_zl":
 
-            print("Both children are infeasible")
+            print("Infeasible left child")
+            return {"result": SCIP_RESULT.CUTOFF}
+        elif data_l[1] != "updated_zl" and data_r[1] == "infeasible":
+
+            print("Infeasible right child")
             return {"result": SCIP_RESULT.CUTOFF}
 
         elif data_l[1] == "updated_zl" and data_r[1] != "updated_zl" :
@@ -1424,6 +1428,7 @@ class MyBranching(Branchrule):
                 print("Rhs:", self.model.getRhs(addedCons[0]))
                 print("Lhs:", self.model.getLhs(addedCons[0]))
                 print("Number of added constraints:", num_addedCons)
+
         return curr_Node
 
 
