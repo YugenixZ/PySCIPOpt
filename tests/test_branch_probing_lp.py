@@ -386,16 +386,6 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
         print(f"An error occurred: {e}")
         result = [None, None, None, None, None]
         return result
-    # # Check the feasibility of Ax ≥ b, πx ≤ π0, cx ≤ zl and Ax ≥ b, πx ≥ π0 + 1, cx ≤ zl
-    # cm1, cm1_status, frac_1, lpcands_1, est_1 = check_model("check_model_1", A, b, c, best_pi_solution , best_pi0_solution,
-    #                                                             best_zl, n, m, "pi", model)
-    # cm2, cm2_status, frac_2, lpcands_2, est_2 = check_model("check_model_2", A, b, c, best_pi_solution, best_pi0_solution,
-    #                                                             best_zl, n, m, "pi0+1", model)
-
-    # # assert np.abs(best_pi_solution).sum() + np.abs(best_pi0_solution) > 1e-6
-    # cm1_data = [cm1, cm1_status, frac_1, lpcands_1, est_1]
-    # cm2_data = [cm2, cm2_status, frac_2, lpcands_2, est_2]
-
 
     return result
 
@@ -405,22 +395,8 @@ class MyBranching(Branchrule):
         self.model = model
 
     def branchexeclp(self, allowaddcons):
-            # lpcands = self.model.getLPBranchCands()[0]
-            # fracs = self.model.getLPBranchCands()[2]
             print("_____________________________________")
             print("Now starting branching")
-            # print("model upper bound:", self.model.getPrimalbound())
-            # # get the variable with the largest fractional part
-            # # Pair each candidate with its fractional part
-            # cand_frac_pairs = zip(lpcands, fracs)
-            #
-            # # Find the candidate with the largest fractional part
-            # bestcand = max(cand_frac_pairs, key=lambda pair: pair[1])[0]
-            #
-            # down, eq, up = self.model.branchVar(bestcand)
-            # assert eq is None
-            # print("branching on", bestcand, "down", down, "up", up)
-
             # Check if the added constraint is added to the node or not
             curr_Node = self.model.getCurrentNode()
             print("Current branching Node number:", curr_Node.getNumber())
@@ -468,20 +444,6 @@ class MyBranching(Branchrule):
             zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
             print(zl_curr)
             downprio = 1.0
-
-            # # create down child for cm1_status
-            # left_child = self.model.createChild(downprio, self.model.getLPObjVal())
-            # right_child = self.model.createChild(downprio, self.model.getLPObjVal())
-            # # add left constraint: pi * x <= pi0
-            # cons_l = self.model.createConsFromExpr(
-            #     lpcands[0] <= np.floor(lpcands[0].getLPSol()),
-            #     'left' + str(curr_Node.getNumber()))
-            # con_r = self.model.createConsFromExpr(
-            #     lpcands[0] >= np.ceil(lpcands[0].getLPSol()),
-            #     'right' + str(curr_Node.getNumber()))
-            #
-            # self.model.addConsNode(left_child, cons_l)
-            # self.model.addConsNode(right_child, con_r)
 
             # create down child for cm1_status\
             print(f"Rows of A on Node {curr_Node.getNumber()}:", A.shape[0])
