@@ -128,9 +128,9 @@ def check_feasibility(model, model_org, Best_zl, n):
         else:
             status = "unchanged_zl"
             est = 1e+20
-            # prob_name = model_org.getProbName()
-            # curr_node_num = model_org.getCurrentNode().getNumber()
-            # model.writeProblem(f"./Prob_obj_le_zl/{prob_name}_Node{curr_node_num}_with_zl{Best_zl}.lp")
+            prob_name = model_org.getProbName()
+            curr_node_num = model_org.getCurrentNode().getNumber()
+            model.writeProblem(f"./Prob_obj_le_zl/{prob_name}_Node{curr_node_num}_with_zl{Best_zl}.lp")
             return status, est
     else:
         status = "infeasible"
@@ -253,26 +253,28 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
                     elif status_r == "updated_zl" and status_l == "updated_zl":
                         estL_list.append(est_l)
                         estR_list.append(est_r)
-                elif status_l == "infeasible" and status_r != "updated_zl":
-                    feasible_zl.append(zl)
-                    best_pi_solutions.append(pi_solution)
-                    best_pi0_solutions.append(pi0_solution)
-                    Status_l.append(status_l)
-                    Status_r.append(status_r)
+                else:
                     zl_high = zl
-
-                elif status_r == "infeasible" and status_l != "updated_zl":
-                    feasible_zl.append(zl)
-                    best_pi_solutions.append(pi_solution)
-                    best_pi0_solutions.append(pi0_solution)
-                    Status_l.append(status_l)
-                    Status_r.append(status_r)
-                    zl_high = zl
-
-                elif status_l == "unchanged_zl" and status_r == "unchanged_zl":
-                    ck_model_r.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_right.lp")
-                    ck_model_l.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_left.lp")
-                    print("Both models's lower bounds are less than the corresponding zl, Farkas' lemma is violated. The problems are written to the file.")
+                # elif status_l == "infeasible" and status_r != "updated_zl":
+                #     feasible_zl.append(zl)
+                #     best_pi_solutions.append(pi_solution)
+                #     best_pi0_solutions.append(pi0_solution)
+                #     Status_l.append(status_l)
+                #     Status_r.append(status_r)
+                #     zl_high = zl
+                #
+                # elif status_r == "infeasible" and status_l != "updated_zl":
+                #     feasible_zl.append(zl)
+                #     best_pi_solutions.append(pi_solution)
+                #     best_pi0_solutions.append(pi0_solution)
+                #     Status_l.append(status_l)
+                #     Status_r.append(status_r)
+                #     zl_high = zl
+                #
+                # elif status_l == "unchanged_zl" and status_r == "unchanged_zl":
+                #     ck_model_r.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_right.lp")
+                #     ck_model_l.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_left.lp")
+                #     print("Both models's lower bounds are less than the corresponding zl, Farkas' lemma is violated. The problems are written to the file.")
             else:
                 zl_high = zl
 
