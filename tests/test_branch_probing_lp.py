@@ -120,7 +120,9 @@ def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition, b
 def check_feasibility(model, model_org, Best_zl, n):
 
     if model.getStatus() == "optimal":
+        obj_val = model.getObjVal()
         if model.getObjVal() - Best_zl > 1e-6:
+
             status = "updated_zl"
             # Get the fractional part of the integer/binary variables
             sol_ck = model.getBestSol()
@@ -131,6 +133,7 @@ def check_feasibility(model, model_org, Best_zl, n):
             prob_name = model_org.getProbName()
             curr_node_num = model_org.getCurrentNode().getNumber()
             model.writeProblem(f"./Prob_obj_le_zl/{prob_name}_Node{curr_node_num}_with_zl{Best_zl}.lp")
+            print("The objctive value is:", obj_val)
             return status, est
     else:
         status = "infeasible"
@@ -153,13 +156,8 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
 
     try:
         # Initialize variables
-        best_zl = zl_init
         best_pi_solutions = []
         best_pi0_solutions = []
-        p_solutions = []
-        q_solutions = []
-        s_L_solutions = []
-        s_R_solutions = []
         estL_list = []
         estR_list = []
         Status_l = []
@@ -216,11 +214,10 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
                 for col in Cols:
                     v_lp = col.getVar()
                     x_star.append(model.getSolVal(None, v_lp))
-                # for v in model.getVars():
-                #     x_star.append(model.getSolVal(None, v))
+
                 model_sub.addCons(pi0 <= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) - epsilon)
                 model_sub.addCons(pi0 >= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) + epsilon - 1)
-            model_sub.hideOutput()
+            # model_sub.hideOutput()
             model_sub.setRealParam("limits/time", 1000)
             model_sub.optimize()
 
@@ -253,15 +250,16 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
                     elif status_r == "updated_zl" and status_l == "updated_zl":
                         estL_list.append(est_l)
                         estR_list.append(est_r)
+
+                elif status_l == "infeasible" and status_r == "infeasible":
+                    feasible_zl.append(zl)
+                    best_pi_solutions.append(pi_solution)
+                    best_pi0_solutions.append(pi0_solution)
+                    Status_l.append(status_l)
+                    Status_r.append(status_r)
+                    zl_high = zl
                 else:
                     zl_high = zl
-                # elif status_l == "infeasible" and status_r != "updated_zl":
-                #     feasible_zl.append(zl)
-                #     best_pi_solutions.append(pi_solution)
-                #     best_pi0_solutions.append(pi0_solution)
-                #     Status_l.append(status_l)
-                #     Status_r.append(status_r)
-                #     zl_high = zl
                 #
                 # elif status_r == "infeasible" and status_l != "updated_zl":
                 #     feasible_zl.append(zl)
@@ -274,7 +272,7 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
                 # elif status_l == "unchanged_zl" and status_r == "unchanged_zl":
                 #     ck_model_r.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_right.lp")
                 #     ck_model_l.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_left.lp")
-                #     print("Both models's lower bounds are less than the corresponding zl, Farkas' lemma is violated. The problems are written to the file.")
+                #     print("Both models‘ lower bounds are less than the corresponding zl, Farkas' lemma is violated. The problems are written to the file.")
             else:
                 zl_high = zl
 
