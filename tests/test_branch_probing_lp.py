@@ -117,23 +117,19 @@ def check_model_two(name, A, b, c, pi_solution, pi0_solution, n, m, condition, b
 
     return model_ck
 
-def check_feasibility(model, model_org, Best_zl, n):
+def check_feasibility(model, Best_zl):
 
     if model.getStatus() == "optimal":
-        obj_val = model.getObjVal()
         if model.getObjVal() - Best_zl > 1e-6:
-
             status = "updated_zl"
-            # Get the fractional part of the integer/binary variables
-            sol_ck = model.getBestSol()
             est = model.getObjVal()
         else:
-            status = "unchanged_zl"
+            status = "obj_val less than Best_zl"
             est = 1e+20
-            prob_name = model_org.getProbName()
-            curr_node_num = model_org.getCurrentNode().getNumber()
-            model.writeProblem(f"./Prob_obj_le_zl/{prob_name}_Node{curr_node_num}_with_zl{Best_zl}.lp")
-            print("The objctive value is:", obj_val)
+            # prob_name = model_org.getProbName()
+            # curr_node_num = model_org.getCurrentNode().getNumber()
+            # model.writeProblem(f"./Prob_obj_le_zl/{prob_name}_Node{curr_node_num}_with_zl{Best_zl}.lp")
+            # print("The objctive value is:", obj_val)
             return status, est
     else:
         status = "infeasible"
@@ -154,147 +150,137 @@ def general_disjunction(A, b, c, zl_init, M, k, delta, model):
      delta is a small positive number
     """
 
-    try:
-        # Initialize variables
-        best_pi_solutions = []
-        best_pi0_solutions = []
-        estL_list = []
-        estR_list = []
-        Status_l = []
-        Status_r = []
-        zl_low = zl_init
-        if zl_init > 0:
-            zl_high = zl_init * 2
-        elif zl_init < 0:
-            zl_high = zl_init / 2
-        else:
-            zl_high = 1
 
-        feasible_zl = []
-        while np.abs(zl_high - zl_low) > 1e-6:
-            zl = (zl_high + zl_low) * 0.5
-            m, n = A.shape  # m is the number of rows and n is the number of columns
-            model_sub = Model("sub")
+    # Initialize variables
+    best_pi_solutions = []
+    best_pi0_solutions = []
+    estL_list = []
+    estR_list = []
+    Status_l = []
+    Status_r = []
+    zl_low = zl_init
+    if zl_init > 0:
+        zl_high = zl_init * 2
+    elif zl_init < 0:
+        zl_high = zl_init / 2
+    else:
+        zl_high = 2
 
-            # Define vector variables
-            p = [model_sub.addVar(f"p_{i}", lb=0) for i in range(m)]
-            s_L = model_sub.addVar(f"s_L", lb=0)
-            q = [model_sub.addVar(f"q_{i}", lb=0) for i in range(m)]
-            s_R = model_sub.addVar(f"s_R", lb=0)
-            pi_plus = [model_sub.addVar(f"pi_plus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
-            pi_minus = [model_sub.addVar(f"pi_minus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
-            pi0 = model_sub.addVar("pi0", vtype="I", lb=None)
+    feasible_zl = []
+    while np.abs(zl_high - zl_low) > 1e-6:
+        zl = (zl_high + zl_low) * 0.5
+        m, n = A.shape  # m is the number of rows and n is the number of columns
+        model_sub = Model("sub")
 
-            # pA − s_Lc − (π_plus - π_minus) = 0
-            for j in range(n):
-                model_sub.addCons(
-                    quicksum(p[i] * A[i][j] for i in range(m)) - s_L * c[j] - pi_plus[j] + pi_minus[j] == 0)
+        # Define vector variables
+        p = [model_sub.addVar(f"p_{i}", lb=0) for i in range(m)]
+        s_L = model_sub.addVar(f"s_L", lb=0)
+        q = [model_sub.addVar(f"q_{i}", lb=0) for i in range(m)]
+        s_R = model_sub.addVar(f"s_R", lb=0)
+        pi_plus = [model_sub.addVar(f"pi_plus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
+        pi_minus = [model_sub.addVar(f"pi_minus_{j}", vtype="I", lb=0, ub=M) for j in range(n)]
+        pi0 = model_sub.addVar("pi0", vtype="I", lb=None)
 
-            # pb − s_Lz_l − π0 ≥ δ
-            model_sub.addCons(quicksum(p[i] * b[i] for i in range(m)) - s_L * zl - pi0 >= delta)
-
-            # qA − s_Rc + (π_plus - π_minus) = 0
-            for j in range(n):
-                model_sub.addCons(
-                    quicksum(q[i] * A[i][j] for i in range(m)) - s_R * c[j] + pi_plus[j] - pi_minus[j] == 0)
-
-            # qb − s_Rz_l + π0 ≥ δ − 1
+        # pA − s_Lc − (π_plus - π_minus) = 0
+        for j in range(n):
             model_sub.addCons(
-                quicksum(q[i] * b[i] for i in range(m)) - s_R * zl + pi0 >= delta - 1)
+                quicksum(p[i] * A[i][j] for i in range(m)) - s_L * c[j] - pi_plus[j] + pi_minus[j] == 0)
 
-            # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
-            model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
+        # pb − s_Lz_l − π0 ≥ δ
+        model_sub.addCons(quicksum(p[i] * b[i] for i in range(m)) - s_L * zl - pi0 >= delta)
 
-            # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the original problem
-            status_LP = model.getLPSolstat()
-            if status_LP == 1:
-                x_star = []  # Get the solution of the curr LP
-                epsilon = 1e-4
-                Cols = model.getLPColsData()
-                for col in Cols:
-                    v_lp = col.getVar()
-                    x_star.append(model.getSolVal(None, v_lp))
+        # qA − s_Rc + (π_plus - π_minus) = 0
+        for j in range(n):
+            model_sub.addCons(
+                quicksum(q[i] * A[i][j] for i in range(m)) - s_R * c[j] + pi_plus[j] - pi_minus[j] == 0)
 
-                model_sub.addCons(pi0 <= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) - epsilon)
-                model_sub.addCons(pi0 >= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) + epsilon - 1)
-            # model_sub.hideOutput()
-            model_sub.setRealParam("limits/time", 1000)
+        # qb − s_Rz_l + π0 ≥ δ − 1
+        model_sub.addCons(
+            quicksum(q[i] * b[i] for i in range(m)) - s_R * zl + pi0 >= delta - 1)
+
+        # Add the constraint ∑ abs(π+_i - π-_i) ≤ k
+        model_sub.addCons(quicksum(pi_plus[i] + pi_minus[i] for i in range(n)) <= k)
+
+        # add π0 < πx∗ < π0 + 1 if x∗ is known to be a fractional optimal solution of the LP relaxation of the original problem
+        status_LP = model.getLPSolstat()
+        if status_LP == 1:
+            x_star = []  # Get the solution of the curr LP
+            epsilon = 1e-4
+            Cols = model.getLPColsData()
+            for col in Cols:
+                v_lp = col.getVar()
+                x_star.append(model.getSolVal(None, v_lp))
+
+            model_sub.addCons(pi0 <= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) - epsilon)
+            model_sub.addCons(pi0 >= quicksum((pi_plus[i] - pi_minus[i]) * x_star[i] for i in range(n)) + epsilon - 1)
+        model_sub.hideOutput()
+        model_sub.setRealParam("limits/time", 1000)
+        try:
             model_sub.optimize()
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
-            if model_sub.getStatus() == "optimal":
-                pi_solution = np.array([model_sub.getVal(pi_plus[i]) - model_sub.getVal(pi_minus[i]) for i in range(n)])
-                pi0_solution = model_sub.getVal(pi0)
-                assert model_sub.isFeasIntegral(pi0_solution)
-                for i in pi_solution:
-                    assert model_sub.isFeasIntegral(i)
+        if model_sub.getStatus() == "optimal":
+            pi_solution = np.array([model_sub.getVal(pi_plus[i]) - model_sub.getVal(pi_minus[i]) for i in range(n)], dtype= np.int32)
+            pi0_solution = np.int32(model_sub.getVal(pi0))
 
-                ck_model_l = check_model_two("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
-                ck_model_r = check_model_two("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
+            assert model_sub.isFeasIntegral(pi0_solution)
+            for i in pi_solution:
+                assert model_sub.isFeasIntegral(i)
 
-                status_l, est_l = check_feasibility(ck_model_l, model, zl, n)
-                status_r, est_r = check_feasibility(ck_model_r, model, zl, n)
+            ck_model_l = check_model_two("check_model_left", A, b, c, pi_solution, pi0_solution, n, m, "pi0", zl)
+            ck_model_r = check_model_two("check_model_right", A, b, c, pi_solution, pi0_solution, n, m, "pi0+1", zl)
 
-                if status_l == "updated_zl" or status_r == "updated_zl":
-                    feasible_zl.append(zl)
-                    best_pi_solutions.append(pi_solution)
-                    best_pi0_solutions.append(pi0_solution)
-                    Status_l.append(status_l)
-                    Status_r.append(status_r)
-                    zl_low = zl
-                    if status_l == "updated_zl" and status_r != "updated_zl":
-                        estL_list.append(est_l)
-                        estR_list.append(1e+20)
-                    elif status_r == "updated_zl" and status_l != "updated_zl":
-                        estR_list.append(est_r)
-                        estL_list.append(1e+20)
-                    elif status_r == "updated_zl" and status_l == "updated_zl":
-                        estL_list.append(est_l)
-                        estR_list.append(est_r)
+            status_l, est_l = check_feasibility(ck_model_l, zl)
+            status_r, est_r = check_feasibility(ck_model_r, zl)
 
-                elif status_l == "infeasible" and status_r == "infeasible":
-                    feasible_zl.append(zl)
-                    best_pi_solutions.append(pi_solution)
-                    best_pi0_solutions.append(pi0_solution)
-                    Status_l.append(status_l)
-                    Status_r.append(status_r)
-                    zl_high = zl
-                else:
-                    zl_high = zl
-                #
-                # elif status_r == "infeasible" and status_l != "updated_zl":
-                #     feasible_zl.append(zl)
-                #     best_pi_solutions.append(pi_solution)
-                #     best_pi0_solutions.append(pi0_solution)
-                #     Status_l.append(status_l)
-                #     Status_r.append(status_r)
-                #     zl_high = zl
-                #
-                # elif status_l == "unchanged_zl" and status_r == "unchanged_zl":
-                #     ck_model_r.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_right.lp")
-                #     ck_model_l.writeProblem(f"./Prob_obj_ge_zl/{model.getProbName()}_Node{model.getCurrentNode().getNumber()}_left.lp")
-                #     print("Both models‘ lower bounds are less than the corresponding zl, Farkas' lemma is violated. The problems are written to the file.")
+            if status_l == "updated_zl" or status_r == "updated_zl":
+                feasible_zl.append(zl)
+                best_pi_solutions.append(pi_solution)
+                best_pi0_solutions.append(pi0_solution)
+                Status_l.append(status_l)
+                Status_r.append(status_r)
+                zl_low = zl
+                if status_l == "updated_zl" and status_r != "updated_zl":
+                    estL_list.append(est_l)
+                    estR_list.append(1e+20)
+                elif status_r == "updated_zl" and status_l != "updated_zl":
+                    estR_list.append(est_r)
+                    estL_list.append(1e+20)
+                elif status_r == "updated_zl" and status_l == "updated_zl":
+                    estL_list.append(est_l)
+                    estR_list.append(est_r)
+
+            elif status_l == "infeasible" and status_r == "infeasible":
+                feasible_zl.append(zl)
+                best_pi_solutions.append(pi_solution)
+                best_pi0_solutions.append(pi0_solution)
+                Status_l.append(status_l)
+                Status_r.append(status_r)
+                zl_high = zl
             else:
                 zl_high = zl
 
-        assert len(feasible_zl) == len(best_pi_solutions) == len(best_pi0_solutions)
-
-        if len(feasible_zl) == 0:
-            result = [None, None, None, None, None]
         else:
-            best_zl = np.max(feasible_zl)
-            idx_zl = feasible_zl.index(best_zl)
-            best_pi_solution = best_pi_solutions[idx_zl]
-            best_pi0_solution = best_pi0_solutions[idx_zl]
-            data_l = [estL_list[idx_zl], Status_l[idx_zl]]
-            data_r = [estR_list[idx_zl], Status_r[idx_zl]]
-            result = [best_zl, best_pi_solution, best_pi0_solution, data_l, data_r]
+            zl_high = zl
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    assert len(feasible_zl) == len(best_pi_solutions) == len(best_pi0_solutions)
+
+    if len(feasible_zl) == 0:
         result = [None, None, None, None, None]
-        return result
+    else:
+        best_zl = np.max(feasible_zl)
+        idx_zl = feasible_zl.index(best_zl)
+        best_pi_solution = best_pi_solutions[idx_zl]
+        best_pi0_solution = best_pi0_solutions[idx_zl]
+        data_l = [estL_list[idx_zl], Status_l[idx_zl]]
+        data_r = [estR_list[idx_zl], Status_r[idx_zl]]
+        result = [best_zl, best_pi_solution, best_pi0_solution, data_l, data_r]
 
     return result
+
+
+
 
 def test_model_Abc(model, A, b, c, Cols_lp):
     # Get the LP solution for testing
