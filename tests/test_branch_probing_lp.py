@@ -1302,6 +1302,36 @@ class MyBranching(Branchrule):
     def __init__(self, model):
         self.model = model
 
+    def get_information(self):
+        print("_____________________________________")
+        print("Now starting branching")
+        # Check if the added constraint is added to the node or not
+        curr_Node = self.model.getCurrentNode()
+        print("Current branching Node number:", curr_Node.getNumber())
+        if curr_Node.getDepth() > 0:
+            num_addedCons = curr_Node.getNAddedConss()
+            addedCons = curr_Node.getAddedConss()
+
+            if addedCons:
+                print("Added constraint:", self.model.getRowLinear(addedCons[0]).getVals())
+                print("Rhs:", self.model.getRhs(addedCons[0]))
+                print("Lhs:", self.model.getLhs(addedCons[0]))
+                print("Number of added constraints:", num_addedCons)
+
+        return curr_Node
+
+    def create_child_with_constraint(self, curr_Node, pi_curr, variables_lp, pi0_curr, data, direction):
+        child = self.model.createChild(1.0, data[0])
+        if direction == 'left':
+            cons = self.model.createConsFromExpr(
+                quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
+                direction + str(curr_Node.getNumber()))
+        else:
+            cons = self.model.createConsFromExpr(
+                quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
+                direction + str(curr_Node.getNumber()))
+        self.model.addConsNode(child, cons)
+
     def branchexeclp(self, allowaddcons):
 
         # Get the current node information
@@ -1324,37 +1354,37 @@ class MyBranching(Branchrule):
         k = 2
         zl_curr, pi_curr, pi0_curr, data_l, data_r = general_disjunction(A, b, c, zl_init, M, k, delta, self.model)
 
+
         # Create down children
         downprio = 1.0
+        # Check the info on current node
         print(f"Rows of A on Node {curr_Node.getNumber()}:", A.shape[0])
         print(f"Columns of A on Node {curr_Node.getNumber()}:", A.shape[1])
 
-        print("Allowaddcons:", allowaddcons)
+        # Check the children data and create children
         if data_l is None or data_r is None:
             print("Both children are not added, data is None")
             return {"result": SCIP_RESULT.DIDNOTFIND}
 
         elif data_l[1] == "updated_zl" and data_r[1] == "updated_zl":
 
-            left_child = self.model.createChild(downprio, data_l[0])
-            # add left constraint: pi * x <= pi0
-            cons_l = self.model.createConsFromExpr(
-                quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
-                'left' + str(curr_Node.getNumber()))
-            # print("Left constraint pi:", pi_curr)
-            # print("Left constraint pi0:", pi0_curr)
-            self.model.addConsNode(left_child, cons_l)
+            # left_child = self.model.createChild(downprio, data_l[0])
+            # # add left constraint: pi * x <= pi0
+            # cons_l = self.model.createConsFromExpr(
+            #     quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
+            #     'left' + str(curr_Node.getNumber()))
+            # self.model.addConsNode(left_child, cons_l)
+            #
+            # # create down child for cm2_status
+            # right_child = self.model.createChild(downprio, data_r[0])
+            # # add right constraint: pi * x >= pi0 + 1
+            # cons_r = self.model.createConsFromExpr(
+            #     quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
+            #     'right' + str(curr_Node.getNumber()))
+            # self.model.addConsNode(right_child, cons_r)
 
-            # create down child for cm2_status
-            right_child = self.model.createChild(downprio, data_r[0])
-            # add right constraint: pi * x >= pi0 + 1
-            cons_r = self.model.createConsFromExpr(
-                quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
-                'right' + str(curr_Node.getNumber()))
-            # print("Right constraint pi:", pi_curr)
-            # print("Right constraint pi0:", pi0_curr)
-            self.model.addConsNode(right_child, cons_r)
-
+            self.create_child_with_constraint(curr_Node, pi_curr, variables_lp, pi0_curr, data_l, 'left')
+            self.create_child_with_constraint(curr_Node, pi_curr, variables_lp, pi0_curr, data_l, 'right')
             print("Both children are added")
             return {"result": SCIP_RESULT.BRANCHED}
 
@@ -1369,14 +1399,15 @@ class MyBranching(Branchrule):
 
         elif data_l[1] == "updated_zl" and data_r[1] != "updated_zl" :
 
-            child_node = self.model.createChild(downprio, data_l[0])
-            # add left constraint: pi * x <= pi0
-            cons_l = self.model.createConsFromExpr(
-                quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
-                'left' + str(curr_Node.getNumber()))
+            # child_node = self.model.createChild(downprio, data_l[0])
+            # # add left constraint: pi * x <= pi0
+            # cons_l = self.model.createConsFromExpr(
+            #     quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) <= pi0_curr,
+            #     'left' + str(curr_Node.getNumber()))
+            # self.model.addConsNode(child_node, cons_l)
 
-            self.model.addConsNode(child_node, cons_l)
-            # self.model.addConsLocal(cons_l)
+            self.create_child_with_constraint(curr_Node, pi_curr, variables_lp, pi0_curr, data_l, 'left')
+
             print("Only Left constraint added:")
 
             return {"result": SCIP_RESULT.BRANCHED}
@@ -1384,38 +1415,25 @@ class MyBranching(Branchrule):
 
         elif data_r[1] == "updated_zl" and data_l[1] != "updated_zl":
 
-            child_node = self.model.createChild(downprio, data_r[0])
-            # add right constraint: pi * x >= pi0 + 1
-            cons_r = self.model.createConsFromExpr(
-                quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
-                'right' + str(curr_Node.getNumber()))
-            self.model.addConsNode(child_node, cons_r)
-            print("Only Right constraint added:")
-            # self.model.addConsLocal(cons_r)
+            # child_node = self.model.createChild(downprio, data_r[0])
+            # # add right constraint: pi * x >= pi0 + 1
+            # cons_r = self.model.createConsFromExpr(
+            #     quicksum(pi_curr[i] * variables_lp[i] for i in range(len(variables_lp))) >= pi0_curr + 1,
+            #     'right' + str(curr_Node.getNumber()))
+            # self.model.addConsNode(child_node, cons_r)
 
+            self.create_child_with_constraint(curr_Node, pi_curr, variables_lp, pi0_curr, data_r, 'right')
+            print("Only Right constraint added:")
             return {"result": SCIP_RESULT.BRANCHED}
+
+            # self.model.addConsLocal(cons_r)
             # return {"result": SCIP_RESULT.CONSADDED}
         else:
             print("Both children are not added")
             return {"result": SCIP_RESULT.DIDNOTFIND}
 
-    def get_information(self):
-        print("_____________________________________")
-        print("Now starting branching")
-        # Check if the added constraint is added to the node or not
-        curr_Node = self.model.getCurrentNode()
-        print("Current branching Node number:", curr_Node.getNumber())
-        if curr_Node.getDepth() > 0:
-            num_addedCons = curr_Node.getNAddedConss()
-            addedCons = curr_Node.getAddedConss()
 
-            if addedCons:
-                print("Added constraint:", self.model.getRowLinear(addedCons[0]).getVals())
-                print("Rhs:", self.model.getRhs(addedCons[0]))
-                print("Lhs:", self.model.getLhs(addedCons[0]))
-                print("Number of added constraints:", num_addedCons)
 
-        return curr_Node
 
 
 if __name__ == "__main__":
